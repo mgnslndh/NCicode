@@ -1,0 +1,32 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="$(SolutionDir)\NCicode.UnitTests\bin\debug\NCicode.UnitTests.dll" #>
+<#@ import namespace="NCicode.UnitTests" #>
+<#@ output extension=".generated.cs" #>
+using System;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+namespace NCicode.UnitTests.Regression
+{
+    [TestClass]
+    public class CicodeTests : RegressionTests
+    {
+<#
+string[] resourceNames = typeof(RegressionTests).Assembly.GetManifestResourceNames();
+foreach (string resourceName in resourceNames)
+{
+    if (resourceName.StartsWith("NCicode.UnitTests.Regression.Cicode"))
+    {
+		string testCaseName = resourceName.Replace("NCicode.UnitTests.Regression.Cicode.", "").Replace(".ci", "");
+
+#>
+		[TestMethod]
+		public void ShouldParse<#=testCaseName#>()
+		{
+			ParseAndAssertNoErrors("<#=resourceName#>");
+		}
+
+<#        
+    }
+}
+#>		
+	}
+}

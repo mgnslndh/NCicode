@@ -1,0 +1,8 @@
+﻿FUNCTION A()
+	INT a;
+	STRING x;
+	INT b;
+	STRING y;
+	INT c;
+	STRING z;		
+END

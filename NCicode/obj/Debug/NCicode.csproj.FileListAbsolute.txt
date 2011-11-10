@@ -1,0 +1,7 @@
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\bin\Debug\NCicode.dll
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\bin\Debug\NCicode.pdb
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\bin\Debug\Irony.dll
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\obj\Debug\ResolveAssemblyReference.cache
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\obj\Debug\NCicode.dll
+c:\users\magnus\documents\visual studio 2010\Projects\NCicode\NCicode\obj\Debug\NCicode.pdb
+C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode\bin\Debug\Irony.Interpreter.dll
