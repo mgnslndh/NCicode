@@ -1,9 +1,0 @@
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\obj\Debug\ResolveAssemblyReference.cache
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\NCicode.UnitTests.dll
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\NCicode.UnitTests.pdb
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\Irony.dll
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\Irony.Interpreter.dll
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\NCicode.dll
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\bin\Debug\NCicode.pdb
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\obj\Debug\NCicode.UnitTests.dll
-C:\Users\Magnus\documents\visual studio 2010\Projects\NCicode\NCicode.UnitTests\obj\Debug\NCicode.UnitTests.pdb
