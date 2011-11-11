@@ -27,6 +27,8 @@ namespace NCicode
             var semiStatement = new NonTerminal("semi-statement");
             var variableDeclaration = new NonTerminal("variable-declaration");
             var block = new NonTerminal("block");
+            var variableInitializer = new NonTerminal("variableInitializer");
+            var variableInitializers = new NonTerminal("variableInitializers");
             var blockContent = new NonTerminal("block-content");
             var blockDeclarations = new NonTerminal("block-declarations");
             var blockDeclaration = new NonTerminal("block-declaration");
@@ -111,8 +113,15 @@ namespace NCicode
             program.Rule = declarations;
             declarations.Rule = MakeStarRule(declarations, declaration);
 
+            variableInitializer.Rule = identifier + assignmentOperator + literal;
+            variableInitializers.Rule
+                = variableInitializers + "," + variableInitializer
+                | variableInitializer                
+                ;
+
             variableDeclaration.Rule
-                = variableType + identifier + ";"
+                = variableType + variableInitializers + ";"
+                | variableType + identifier + ";"
                 ;
 
             variableType.Rule
