@@ -1,6 +1,5 @@
-﻿<#@ template debug="false" hostspecific="false" language="C#" #>
-<#@ assembly name="$(SolutionDir)\NCicode.UnitTests\bin\debug\NCicode.UnitTests.dll" #>
-<#@ import namespace="NCicode.UnitTests" #>
+﻿<#@ template debug="false" hostspecific="true" language="C#" #>
+<#@ import namespace="System.IO" #>
 <#@ output extension=".generated.cs" #>
 using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -10,23 +9,25 @@ namespace NCicode.UnitTests.Regression
     public class CicodeTests : RegressionTests
     {
 <#
-string[] resourceNames = typeof(RegressionTests).Assembly.GetManifestResourceNames();
-foreach (string resourceName in resourceNames)
+var path = Path.Combine("", "Cicode");
+path = Host.ResolvePath("Cicode");
+var files = Directory.GetFiles(path, "*.ci");
+foreach(var file in files)
 {
-    if (resourceName.StartsWith("NCicode.UnitTests.Regression.Cicode"))
-    {
-		string testCaseName = resourceName.Replace("NCicode.UnitTests.Regression.Cicode.", "").Replace(".ci", "");
-
+	var testCaseName = Path.GetFileNameWithoutExtension(file);
+	var sourceCode = File.ReadAllText(file).Replace("\"", @"""""");
 #>
 		[TestMethod]
 		public void ShouldParse<#=testCaseName#>()
 		{
-			ParseAndAssertNoErrors("<#=resourceName#>");
+			var sourceCode = 
+@"
+<#=sourceCode#>
+";
+			ParseAndAssertNoErrors(sourceCode);
 		}
-
-<#        
-    }
+<#
 }
-#>		
+#>
 	}
 }

@@ -12,11 +12,22 @@ using System.Reflection;
 namespace NCicode.UnitTests
 {    
     public abstract class RegressionTests
-    {                        
+    {
+
+        protected void ParseAndAssertNoErrors(string sourceCode)
+        {
+            var grammar = new CicodeGrammar();
+            var parser = new Parser(grammar);
+            var parseTree = parser.Parse(sourceCode);
+
+            Assert.IsNotNull(parseTree);
+            Assert.IsFalse(parseTree.HasErrors(), GetParserMessages(parseTree));            
+        }
+
         /// <summary>
         /// Load sample program from resources, run it and check its output
         /// </summary>
-        protected void ParseAndAssertNoErrors(string programResourceName)
+        protected void ParseResourceAndAssertNoErrors(string programResourceName)
         {
             var grammar = new CicodeGrammar();
             var parser = new Parser(grammar);
@@ -50,6 +61,10 @@ namespace NCicode.UnitTests
             {
                 sb.AppendFormat("{0} at line {1}, column {2}", message.Message, message.Location.Line, message.Location.Column);
             }
+            sb.AppendLine();
+            sb.AppendLine("Source Code:");
+            sb.AppendLine();
+            sb.Append(parseTree.SourceText);
             return sb.ToString();
         }
 
