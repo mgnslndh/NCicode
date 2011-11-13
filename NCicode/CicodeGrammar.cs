@@ -32,13 +32,15 @@ namespace NCicode
             var blockContent = new NonTerminal("block-content");
             var blockDeclarations = new NonTerminal("block-declarations");
             var blockDeclaration = new NonTerminal("block-declaration");
-            var functionScope = new NonTerminal("function-modifier");
+            var functionScope = new NonTerminal("function-scope");
+            var localVariableDeclaration = new NonTerminal("localVariableDeclaration");
             var parameterType = new NonTerminal("parameterType");
             var functionReturnType = new NonTerminal("function-returnType");
             var returnStatement = new NonTerminal("return-statement");
             var ifStatement = new NonTerminal("if-statement");
             var optionalElseStatement = new NonTerminal("elseStatement");
-            
+            var variableScope = new NonTerminal("variableScope");
+
             // Lexical Structure
 
             var stringLiteral = new StringLiteral("string", "\"", StringOptions.None);            
@@ -119,9 +121,14 @@ namespace NCicode
                 | variableInitializer                
                 ;
 
-            variableDeclaration.Rule
+            localVariableDeclaration.Rule
                 = variableType + variableInitializers + ";"
                 | variableType + identifier + ";"
+                ;
+
+            variableDeclaration.Rule
+                = variableScope + variableType + variableInitializers + ";"
+                | variableScope + variableType + identifier + ";"
                 ;
 
             variableType.Rule
@@ -129,6 +136,12 @@ namespace NCicode
                 | ToTerm("STRING")
                 | ToTerm("REAL")
                 | ToTerm("OBJECT")
+                ;
+
+            variableScope.Rule
+                = Empty                                    
+                | ToTerm("GLOBAL")
+                | ToTerm("MODULE")
                 ;
 
             parameterInitializer.Rule = Empty | assignmentOperator + literal;
@@ -166,17 +179,25 @@ namespace NCicode
             blockDeclarations.Rule = MakeStarRule(blockDeclarations, blockDeclaration);
 
             blockDeclaration.Rule
-                = variableDeclaration;
+                = localVariableDeclaration;
 
             functionScope.Rule
                 = ToTerm("PUBLIC") | "PRIVATE" | Empty;
 
+            // These reduce hints are needed to help determine the difference between
+            // a function declaration and a variable declaration.
+            functionScope.ReduceIf("FUNCTION");
+            variableScope.ReduceIf(semi);
+
             functionReturnType.Rule = variableType | Empty;
 
-            declaration.Rule = functionDeclaration;
+            declaration.Rule 
+                = functionDeclaration
+                | variableDeclaration
+                ;
             functionDeclaration.Rule = functionScope + functionReturnType + "FUNCTION" + identifier + parenParameters + block;
 
-            MarkTransient(semiStatement, declaration, blockDeclaration);
+            MarkTransient(semiStatement, blockDeclaration);
 
         }
     }

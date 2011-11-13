@@ -90,6 +90,10 @@
     <EmbeddedResource Include="Regression\Cicode\IfElse.ci" />
     <EmbeddedResource Include="Regression\Cicode\ReturnWithoutExpression.ci" />
     <EmbeddedResource Include="Regression\Cicode\ReturnWithExpression.ci" />
+    <EmbeddedResource Include="Regression\Cicode\InitializationList.ci" />
+    <None Include="Regression\Cicode\IntDeclarationWithGlobalScope.ci" />
+    <None Include="Regression\Cicode\IntDeclarationWithModuleScope.ci" />
+    <None Include="Regression\Cicode\IntDeclarationWithoutScope.ci" />
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
