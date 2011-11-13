@@ -70,8 +70,7 @@ namespace NCicode
             var literal = new NonTerminal("literal");
             var term = new NonTerminal("term");
             var arithmicExpression = new NonTerminal("arithmicExpression");
-            var parenthesizedExpression = new NonTerminal("ParExpr");
-            var arrayIndexer = new NonTerminal("arrayIndexer");
+            var parenthesizedExpression = new NonTerminal("ParExpr");            
             var unaryExpression = new NonTerminal("UnExpr");
             var unaryOperator = new NonTerminal("UnOp");
             var arithmicOperator = new NonTerminal("arithmicOperator", "operator");            
@@ -98,8 +97,20 @@ namespace NCicode
             MarkPunctuation("(", ")");
             RegisterBracePair("(", ")");
             MarkTransient(term, expression, arithmicOperator, unaryOperator, parenthesizedExpression);
-            
 
+            var parameter_array = new NonTerminal("parameter_array");
+            var arrayIndexer = new NonTerminal("arrayIndexer");
+            var rank_specifier = new NonTerminal("rank_specifier");
+            var rank_specifiers = new NonTerminal("rank_specifiers");
+            var rank_specifiers_opt = new NonTerminal("rank_specifiers_opt");
+            var dim_specifier = new NonTerminal("dim_specifier");
+            var dim_specifier_opt = new NonTerminal("dim_specifier_opt");
+            var list_initializer = new NonTerminal("array_initializer");
+            var list_initializer_opt = new NonTerminal("array_initializer_opt");
+            var arrayIndexDeclaration = new NonTerminal("arrayIndexDeclaration");
+            var arrayIndexDeclarations = new NonTerminal("arrayIndexDeclarations");
+            var arrayInitializers = new NonTerminal("arrayInitializers");
+            var arrayDeclaration = new NonTerminal("arrayDeclaration");
             ////////////////
 
             literal.Rule = numberLiteral | stringLiteral;
@@ -128,8 +139,27 @@ namespace NCicode
 
             variableDeclaration.Rule
                 = variableScope + variableType + variableInitializers + ";"
-                | variableScope + variableType + identifier + ";"
+                | variableScope + variableType + identifier + ";" 
+                | arrayDeclaration + ";"
                 ;
+
+            arrayInitializers.Rule
+                = arrayInitializers + "," + literal
+                | literal
+                ;
+            
+            arrayDeclaration.Rule 
+                = variableScope + variableType + identifier + arrayIndexDeclarations
+                | variableScope + variableType + identifier + arrayIndexDeclarations + assignmentOperator + arrayInitializers;
+
+            arrayIndexDeclarations.Rule
+                = arrayIndexDeclarations + arrayIndexDeclaration
+                | arrayIndexDeclaration                
+                ;
+               
+
+            arrayIndexer.Rule = "[" + expression + "]";
+            arrayIndexDeclaration.Rule = "[" + numberLiteral + "]";
 
             variableType.Rule
                 = ToTerm("INT")

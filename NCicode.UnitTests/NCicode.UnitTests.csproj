@@ -91,6 +91,10 @@
     <EmbeddedResource Include="Regression\Cicode\ReturnWithoutExpression.ci" />
     <EmbeddedResource Include="Regression\Cicode\ReturnWithExpression.ci" />
     <EmbeddedResource Include="Regression\Cicode\InitializationList.ci" />
+    <EmbeddedResource Include="Regression\Cicode\Array.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ArrayWithMultipleDimensions.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ArrayWithMultipleDimensionsAndInitializers.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ArrayWithInitializer.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithGlobalScope.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithModuleScope.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithoutScope.ci" />
