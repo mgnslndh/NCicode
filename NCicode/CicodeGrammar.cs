@@ -40,6 +40,7 @@ namespace NCicode
             var ifStatement = new NonTerminal("if-statement");
             var optionalElseStatement = new NonTerminal("elseStatement");
             var variableScope = new NonTerminal("variableScope");
+            var arrayIndexers = new NonTerminal("arrayIndexers");
 
             // Lexical Structure
 
@@ -76,17 +77,18 @@ namespace NCicode
             var arithmicOperator = new NonTerminal("arithmicOperator", "operator");            
             var assignmentStatement = new NonTerminal("AssignmentStmt");
             var assignmentOperator = new NonTerminal("assignmentOperator");
-            
+            var variable = new NonTerminal("variable");
+
             // 3. BNF rules
             expression.Rule = term | unaryExpression | arithmicExpression;
             optionalExpression.Rule = expression | Empty;
-            term.Rule = numberLiteral | parenthesizedExpression | identifier;
+            term.Rule = numberLiteral | parenthesizedExpression | variable;
             parenthesizedExpression.Rule = "(" + expression + ")";
             unaryExpression.Rule = unaryOperator + term;
             unaryOperator.Rule = ToTerm("-");
             arithmicExpression.Rule = expression + arithmicOperator + expression;
             arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/";                       
-            assignmentStatement.Rule = identifier + assignmentOperator + expression + semi;
+            assignmentStatement.Rule = variable + assignmentOperator + expression + semi;
             assignmentOperator.Rule = ToTerm("=");
                        
             // 4. Operators precedence
@@ -98,15 +100,8 @@ namespace NCicode
             RegisterBracePair("(", ")");
             MarkTransient(term, expression, arithmicOperator, unaryOperator, parenthesizedExpression);
 
-            var parameter_array = new NonTerminal("parameter_array");
+            var arrayIdentifier = new NonTerminal("arrayIdentifier");
             var arrayIndexer = new NonTerminal("arrayIndexer");
-            var rank_specifier = new NonTerminal("rank_specifier");
-            var rank_specifiers = new NonTerminal("rank_specifiers");
-            var rank_specifiers_opt = new NonTerminal("rank_specifiers_opt");
-            var dim_specifier = new NonTerminal("dim_specifier");
-            var dim_specifier_opt = new NonTerminal("dim_specifier_opt");
-            var list_initializer = new NonTerminal("array_initializer");
-            var list_initializer_opt = new NonTerminal("array_initializer_opt");
             var arrayIndexDeclaration = new NonTerminal("arrayIndexDeclaration");
             var arrayIndexDeclarations = new NonTerminal("arrayIndexDeclarations");
             var arrayInitializers = new NonTerminal("arrayInitializers");
@@ -156,10 +151,21 @@ namespace NCicode
                 = arrayIndexDeclarations + arrayIndexDeclaration
                 | arrayIndexDeclaration                
                 ;
-               
 
+            
+            arrayIndexers.Rule
+                = arrayIndexers + arrayIndexer
+                | arrayIndexer
+                ;
+
+            arrayIdentifier.Rule = identifier + arrayIndexers;
             arrayIndexer.Rule = "[" + expression + "]";
             arrayIndexDeclaration.Rule = "[" + numberLiteral + "]";
+
+            variable.Rule
+                = identifier
+                | identifier + arrayIndexers
+                ;
 
             variableType.Rule
                 = ToTerm("INT")
