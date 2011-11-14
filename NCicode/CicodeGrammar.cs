@@ -53,11 +53,13 @@ namespace NCicode
             var optionalSemi = new NonTerminal("semi?");
             optionalSemi.Rule = Empty | semi;
 
-            var lineComment = new CommentTerminal("comment", "//", "\n", "\r");
+            var dashLineComment = new CommentTerminal("comment", "//", "\n", "\r");
+            var bangLineComment = new CommentTerminal("comment", "!", "\n", "\r");
             var blockComment = new CommentTerminal("BLOCK_COMMENT", "/*", "*/");
             //comment must to be added to NonGrammarTerminals list; it is not used directly in grammar rules,
             // so we add it to this list to let Scanner know that it is also a valid terminal. 
-            base.NonGrammarTerminals.Add(lineComment);
+            base.NonGrammarTerminals.Add(dashLineComment);
+            base.NonGrammarTerminals.Add(bangLineComment);
             base.NonGrammarTerminals.Add(blockComment);
             
             
