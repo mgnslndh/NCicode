@@ -1,0 +1,4 @@
+﻿FUNCTION A()	
+	INT b;
+	b = a(0, 1, "hello World");
+END

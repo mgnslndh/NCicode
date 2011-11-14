@@ -98,6 +98,8 @@
     <EmbeddedResource Include="Regression\Cicode\CommentUsingDashes.ci" />
     <EmbeddedResource Include="Regression\Cicode\CommentUsingBlock.ci" />
     <EmbeddedResource Include="Regression\Cicode\CommentUsingBang.ci" />
+    <EmbeddedResource Include="Regression\Cicode\FunctionCallInExpression.ci" />
+    <EmbeddedResource Include="Regression\Cicode\FunctionCallStatement.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithGlobalScope.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithModuleScope.ci" />
     <None Include="Regression\Cicode\IntDeclarationWithoutScope.ci" />

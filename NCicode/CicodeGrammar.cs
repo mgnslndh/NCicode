@@ -41,7 +41,9 @@ namespace NCicode
             var optionalElseStatement = new NonTerminal("elseStatement");
             var variableScope = new NonTerminal("variableScope");
             var arrayIndexers = new NonTerminal("arrayIndexers");
-
+            var functionCall = new NonTerminal("functionCall");
+            var functionCallStatement = new NonTerminal("functionCallStatement");
+            
             // Lexical Structure
 
             var stringLiteral = new StringLiteral("string", "\"", StringOptions.None);            
@@ -68,6 +70,7 @@ namespace NCicode
 
             
             var expression = new NonTerminal("expression");
+            var expressionList = new NonTerminal("expressionList");
             var optionalExpression = new NonTerminal("optional-expression");
             var conditionalExpression = new NonTerminal("conditionalExpression");
             var literal = new NonTerminal("literal");
@@ -82,9 +85,14 @@ namespace NCicode
             var variable = new NonTerminal("variable");
 
             // 3. BNF rules
-            expression.Rule = term | unaryExpression | arithmicExpression;
+            expression.Rule = term | unaryExpression | arithmicExpression | functionCall;
+            expressionList.Rule
+                = expressionList + "," + expression
+                | expression
+                | Empty
+                ;
             optionalExpression.Rule = expression | Empty;
-            term.Rule = numberLiteral | parenthesizedExpression | variable;
+            term.Rule = literal | parenthesizedExpression | variable;
             parenthesizedExpression.Rule = "(" + expression + ")";
             unaryExpression.Rule = unaryOperator + term;
             unaryOperator.Rule = ToTerm("-");
@@ -117,7 +125,8 @@ namespace NCicode
 
             optionalElseStatement.Rule = Empty | ToTerm("ELSE") + block;
 
-
+            functionCall.Rule = identifier + "(" + expressionList + ")";
+            
             this.Root = program;
 
             program.Rule = declarations;
@@ -197,14 +206,17 @@ namespace NCicode
             statements.Rule = MakeStarRule(statements, statement);
             statement.Rule
                 = semiStatement
-                | ifStatement
+                | ifStatement                
                 ;
+
+            functionCallStatement.Rule = functionCall + semi;
 
             returnStatement.Rule = ToTerm("RETURN") + optionalExpression + semi;
 
             semiStatement.Rule
                 = assignmentStatement
                 | returnStatement
+                | functionCallStatement
                 ;
 
             block.Rule
