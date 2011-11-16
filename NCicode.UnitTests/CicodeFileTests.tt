@@ -1,6 +1,6 @@
 ﻿<#@ import namespace="System.IO" #>
 <#+
-public void GenerateTestClass(string className, string nameSpace, string relativeFolder)
+public void GenerateTestClass(string className, string nameSpace, string relativeFolder, string testMethodPrefix = "ShouldParse")
 {
 #>
 using System;
@@ -21,7 +21,7 @@ namespace <#=nameSpace#>
 		var sourceCode = File.ReadAllText(file).Replace("\"", @"""""");
 #>
 		[TestMethod]
-		public void ShouldParse<#=testCaseName#>()
+		public void <#=testMethodPrefix#><#=testCaseName#>()
 		{
 			var sourceCode = 
 @"
