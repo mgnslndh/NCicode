@@ -52,13 +52,13 @@
     </CodeAnalysisDependentAssemblyPaths>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CicodeFileTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Regression\CicodeTests.generated.cs">
+    <Compile Include="Regression\RegressionTests.generated.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
-      <DependentUpon>CicodeTests.tt</DependentUpon>
+      <DependentUpon>RegressionTests.tt</DependentUpon>
     </Compile>
-    <Compile Include="Regression\RegressionTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\NCicode\NCicode.csproj">
@@ -72,9 +72,12 @@
     <EmbeddedResource Include="Regression\Cicode\PublicFunction.ci" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Regression\CicodeTests.tt">
+    <None Include="CicodeFileTests.tt">
+      <LastGenOutput>CicodeFileTests1.cs</LastGenOutput>
+    </None>
+    <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
-      <LastGenOutput>CicodeTests.generated.cs</LastGenOutput>
+      <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>
     </None>
     <EmbeddedResource Include="Regression\Cicode\FunctionWithIntDeclaration.ci" />
     <EmbeddedResource Include="Regression\Cicode\MultipleFunctions.ci" />

@@ -1,0 +1,40 @@
+﻿<#@ import namespace="System.IO" #>
+<#+
+public void GenerateTestClass(string className, string nameSpace, string relativeFolder)
+{
+#>
+using System;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace <#=nameSpace#>
+{
+    [TestClass]
+    public class <#=className#> : CicodeFileTests
+    {
+
+<#+	
+	var path = Host.ResolvePath(relativeFolder);
+	var files = Directory.GetFiles(path, "*.ci");
+	foreach(var file in files)
+	{
+		var testCaseName = Path.GetFileNameWithoutExtension(file);
+		var sourceCode = File.ReadAllText(file).Replace("\"", @"""""");
+#>
+		[TestMethod]
+		public void ShouldParse<#=testCaseName#>()
+		{
+			var sourceCode = 
+@"
+<#=sourceCode#>
+";
+			ParseAndAssertNoErrors(sourceCode);
+		}
+
+<#+
+	}
+#>
+	}
+}
+<#+
+}
+#>

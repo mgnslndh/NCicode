@@ -10,10 +10,9 @@ using Irony;
 using System.Reflection;
 
 namespace NCicode.UnitTests
-{    
-    public abstract class RegressionTests
+{
+    public abstract class CicodeFileTests
     {
-
         protected void ParseAndAssertNoErrors(string sourceCode)
         {
             var grammar = new CicodeGrammar();
@@ -21,7 +20,7 @@ namespace NCicode.UnitTests
             var parseTree = parser.Parse(sourceCode);
 
             Assert.IsNotNull(parseTree);
-            Assert.IsFalse(parseTree.HasErrors(), GetParserMessages(parseTree));            
+            Assert.IsFalse(parseTree.HasErrors(), GetParserMessages(parseTree));
         }
 
         /// <summary>
@@ -32,9 +31,9 @@ namespace NCicode.UnitTests
             var grammar = new CicodeGrammar();
             var parser = new Parser(grammar);
             var parseTree = parser.Parse(LoadResourceText(programResourceName));
-            
+
             Assert.IsNotNull(parseTree);
-            Assert.IsFalse(parseTree.HasErrors(), GetParserMessages(parseTree));            
+            Assert.IsFalse(parseTree.HasErrors(), GetParserMessages(parseTree));
         }
 
         /// <summary>
