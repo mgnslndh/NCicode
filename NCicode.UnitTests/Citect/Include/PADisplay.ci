@@ -1,0 +1,1919 @@
+//-----------------------------------------------------------------------------
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:		PADisplay.ci
+//
+//	CREATED:	07/07/2009
+//
+//	AUTHOR:		TC Guo
+//
+//	SUMMARY:
+//
+//		Contains functions for displaying pages that contains Process Analyst(s).
+//
+//	PUBLIC FUNCTIONS:
+//
+//		PageProcessAnalyst
+//		ProcessAnalystPopup
+//		ProcessAnalystWin
+//		ProcessAnalystLoadFile
+//
+//		PageProcessAnalystPens
+//		ProcessAnalystSetPen
+//		ProcessAnalystSelect
+//
+// 	REMARKS: 
+//
+//		The default values used by the functions are designed for the Tab style
+//		templates which have pre-defined Process Analyst object names. The
+//		user can supply the functions with their own PA object names via the
+//		ObjName arguments of these functions.
+//
+//	USAGE:
+//
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+//
+//	Constants
+//
+//-----------------------------------------------------------------------------
+
+INT		c_PA_MAX_LOADTIME_MS	= 5000;						// Maximum waiting time for PA to be instantiated on a page
+
+STRING	c_PA_DEFAULT_OBJNAME_1	= "_templatePA1";			// Object name for 1st PA in the tab style templates
+STRING	c_PA_DEFAULT_OBJNAME_2	= "_templatePA2";			// Object name for 2nd PA in teh tab style templates
+
+// Constansts for ProcessAnalyst Select Cache
+// ------------------------------------------
+
+INT		c_WINDOW_MAX					= 50;				// Maximum number of window allowed on a project
+
+INT		c_PA_SELECTCACHE_HND_MAX		= 20;				// Maximum number of simutaneous windows supported for PA select
+INT		c_PA_SELECTCACHE_HND_NEXTWINDOW	= 20;				// The PA select cache slot for next window
+INT		c_PA_SELECTCACHE_PEN_MAX		= 8;				// Maximum number of Pens allowed for the select cache for each window
+
+INT		c_PA_OBJECTCACHE_HND_MAX		= 21;				// Maximum number of simultaneous objects that can be PA select'ed
+
+// PA Enumerations
+// ----------------
+
+INT		c_PA_PenType_ANALOG			= 4097;
+INT 	c_PA_PenType_DIGITAL		= 4098;
+INT		c_PA_PenType_ALARM			= 4099;
+INT		c_PA_PenNameMode_Comment	= 1;
+INT		c_PA_PenNameMode_Tag		= 2;
+INT		c_PA_PenNameMode_Custom		= 3;
+
+INT		c_PA_PenLineColor_Max		= 15;
+INT		c_PA_PenLineColor[15]		= 0x0cc6e7
+									, 0x000000, 0xe61900, 0x07258b, 0x007d00, 0xff3366, 0x0033dc, 0x007d6d
+									, 0xff33cc, 0x808080, 0x66cc00, 0xcccc00, 0x3399cc, 0x3399ff, 0x33cc99;
+
+
+//-----------------------------------------------------------------------------
+//
+//	Module Variables
+//
+//-----------------------------------------------------------------------------
+
+// Variables for ProcessAnalyst Select Cache
+// -----------------------------------------
+
+INT		m_PA_SelectCache_PageOpen_ChainEvent	= -1;		// Existing PageOpen event handler for the PA select handler to chain
+INT		m_PA_SelectCache_PageOpen_OnEvent		= -1;		// PageOpen event handler for the PA select operation
+INT		m_PA_SelectCache_NextWindow_Used		= 0;		// Indicate whether PA select cache for next window is used
+
+// The target window for the PA select call
+INT		m_PA_SelectCache_Window			[50]	= -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+												  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+												  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1;
+INT		m_PA_SelectCache_Hnd			[50]	= -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+												  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+												  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1;
+
+// The contents of the PA select cache (which can contain multiple object cache)
+STRING	m_PA_SelectCache_Page			[21];				// Page name to display the PA for each PA select cache
+STRING	m_PA_SelectCache_ActiveObjName	[21];				// The object cache that is currently active
+
+// The contents of object cache
+INT		m_PA_ObjectCache_SelectCacheHnd	[21]	= -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1;
+STRING	m_PA_ObjectCache_ObjName		[21];				// Object name of the PA for each PA object cache
+STRING	m_PA_ObjectCache_Cluster		[21];				// Cluster context for page that displays PA for each PA object cache
+INT		m_PA_ObjectCache_ButtonMask		[21];				// Button Mask of the PA for each PA object cache
+STRING	m_PA_ObjectCache_PAVFile		[21];				// PAV File of the PA for each PA object cache
+INT		m_PA_ObjectCache_FileLocation	[21];				// PAV File location of the PA for each PA object cache
+INT		m_PA_ObjectCache_PenCount		[21];				// Pen count of the PA for each PA object cache
+INT		m_PA_ObjectCache_PenPane		[21][8];			// Pane numbers of each pen of the PA for each PA object cache
+STRING	m_PA_ObjectCache_PenTag			[21][8];			// Tag names (up to 8) of the PA for each PA object cache
+
+
+//-----------------------------------------------------------------------------
+//
+//	Public Functions
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		PageProcessAnalyst
+//
+//	SUMMARY:
+//		Displays a Process Analyst page (in the same window) preloaded with 
+//		the pre-defined Process Analyst View (PAV) file.
+//
+//	PARAMS:
+//
+//		Page			- Name of the page based on a ProcessAnalyst template
+//		
+//		PAVFile1		- the 1st pre-defined PAV file
+//		FileLocation1	- the location code of 1st PAV file, see PA doc LoadFromFile() for details.
+//		ButtonMask1		- bit mask for removing command buttons from the 1st PA UI
+//							1 - Load View
+//							2 - Save View
+//							4 - Print
+//							8 - Copy to Clipboard
+//						   16 - Copy to File
+//						   32 - Add Pens
+//						   64 - Remove Pen
+//						  128 - show properties
+//						  256 - help
+//		ObjName1		- the name of the 1st PA object on the page
+//
+//		PAVFile2		- (Optional) the 2nd pre-defined PAV file
+//		FileLocation2	- (Optional) the location code of 2nd PAV file.
+//		ButtonMask2		- (Optional) bit mask for removing command buttons from the 2nd PA UI
+//		ObjName2		- (Optional) the name of the 2nd object on the page
+//			
+//	RETURNS: 
+//		Zero (0) if the page is successfully displayed, otherwise 
+//		an error is returned.
+//
+//	REMARKS:
+//		If parameter, Page, is set to blank, it will be defaulted to value specified by Citect.ini parameter
+//		[Page] ProcessAnalystPage. The default value of this parameter is "ProcessAnalyst".
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION PageProcessAnalyst(STRING Page,
+									STRING PAVFile1, INT FileLocation1 = 0, INT ButtonMask1 = 0, STRING ObjName1 = "", 
+									STRING PAVFile2 = "", INT FileLocation2 = 0, INT ButtonMask2 = 0, STRING ObjName2 = "")
+	INT error;
+
+	IF ("" = Page) THEN
+		// Get pre-configured page name from INI
+		Page = ParameterGet("Page", "ProcessAnalystPage", "ProcessAnalyst");
+	END
+		
+	error = PageDisplay(Page);
+	
+	IF (0 = error) THEN
+		IF ("" = ObjName1) THEN
+			ObjName1 = c_PA_DEFAULT_OBJNAME_1;
+		END
+		error = ProcessAnalystLoadFile(PAVFile1, FileLocation1, ButtonMask1, ObjName1);
+	
+		IF ("" <> PAVFile2) THEN
+			IF (ObjName2 = ObjName1) THEN
+				// safe guard of popular coding error - invalid argument
+				error = 274;
+			ELSE
+				IF ("" = ObjName2) THEN
+					ObjName2 = c_PA_DEFAULT_OBJNAME_2;
+				END
+				error = ProcessAnalystLoadFile(PAVFile2, FileLocation2, ButtonMask2, ObjName2);
+			END
+		END
+	ELSE
+		// Alert user for configuration error
+		IF (261 = error) THEN
+			// ret = 261 if page does not exist.
+			Message("Configuration Error", sConfigErrMsg(Page, "SinglePA"), 0);
+		END
+	END
+	
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ProcessAnalystWin
+//
+//	SUMMARY:
+//		Displays a Process Analyst page (in a new window) preloaded with  
+//		the pre-defined Process Analyst View (PAV) file.
+//
+//	PARAMS:
+//		Page			- Name of the page based on the ProcessAnalyst Template
+//
+//		X				- the x pixel coordinate
+//		Y				- the y pixel coordinate
+//		Mode			- mode of the window (see WinNewAt() FOR details).
+//
+//		PAVFile			- the pre-defined PAV file
+//		FileLocation	- the location code of PAV file, see PA doc of LoadFromFile()
+//		ButtonMask		- bit ButtonMask for removing command buttons from the PA UI
+//							refer the same parameter in PageProcessAnalyst()
+//		ObjName			- the name of the PA object on the page
+//			
+//	RETURNS: 
+//		window number if the window is successfully displayed. Otherwise -1 is returned.
+//
+//	REMARKS:
+//		If parameter, Page, is set to blank, it will be defaulted to value specified by Citect.ini parameter
+//		[Page] ProcessAnalystPopupPage. The default value of this parameter is "!ProcessAnalystPopup".
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ProcessAnalystWin(STRING Page, INT X, INT Y, INT Mode,
+								STRING PAVFile = "",  INT FileLocation = 0, INT ButtonMask = 0, STRING ObjName="")
+	INT winNum;
+	INT error;
+	INT errorLevelOld = ErrSetLevel(1);
+
+	IF ("" = Page) THEN
+		Page = ParameterGet("Page", "ProcessAnalystPopupPage", "!ProcessAnalystPopup");
+	END
+
+	winNum = WinNewAt(Page, X, Y, Mode);
+	IF (-1 = winNum) THEN
+		// Alert user for configuration error
+		IF (PageFileInfo(Page, 0) < 1) THEN
+			// page does not exist.
+			Message("Configuration Error", sConfigErrMsg(Page, "PopPA"), 0);
+		END
+		ErrSetLevel(errorLevelOld);
+		RETURN -1;
+	END
+
+	IF ("" = ObjName) THEN
+		ObjName = c_PA_DEFAULT_OBJNAME_1;
+	END
+	error = ProcessAnalystLoadFile(PAVFile, FileLocation, ButtonMask, ObjName);
+		
+	ErrSetLevel(errorLevelOld);
+	IF (0 = error) THEN
+		RETURN winNum;
+	ELSE
+		RETURN -1;
+	END
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ProcessAnalystPopup
+//
+//	SUMMARY:
+//		Displays a Process Analyst page (in a new page child window) at the  
+//		current mouse position preloaded with the pre-defined PAV file.
+//
+//	PARAMS:
+//
+//		Page			- Name of the page based on the ProcessAnalyst Template
+//		PAVFile			- the pre-defined PAV file
+//		FileLocation	- the location code of PAV file, see PA doc of LoadFromFile()
+//		ButtonMask		- bit ButtonMask for removing command buttons from the PA UI
+//							refer the same parameter in PageProcessAnalyst()
+//		ObjName			- the name of the PA object on the page
+//		Mode			- (Optional) the window mode of the popup
+//		
+//	RETURNS: 
+//		window number IF the window IS successfully displayed. Otherwise -1 is returned.
+//
+//	REMARKS:
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ProcessAnalystPopup(STRING Page, STRING PAVFile = "", INT FileLocation = 0, 
+									INT ButtonMask = 0, STRING ObjName = "", INT Mode = 261)
+	INT	x, y;
+	REAL	ScaleX, ScaleY;
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+
+	RETURN ProcessAnalystWin(Page, x, y, Mode, PAVFile, FileLocation, ButtonMask, ObjName);
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ProcessAnalystLoadFile
+//
+//	SUMMARY:
+//		Displays a Process Analyst page in the current window and load it
+//		with the pre-defined PAV file.
+//
+//	PARAMS:
+//
+//		PAVFile			- the pre-defined PAV file
+//		FileLocation	- the location code of PAV file, see PA doc of LoadFromFile()
+//		ButtonMask			- bit ButtonMask for removing command buttons from the PA UI
+//							refer the same parameter in PageProcessAnalyst()
+//
+//		ObjName			- the name of the PA object on the page
+//			
+//	RETURNS: 
+//		Zero (0) if the page IS successfully displayed, otherwise 
+//		an error is returned.
+//
+//	REMARKS:
+//		This is a blocking function. It cannot be called from foreground task
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ProcessAnalystLoadFile(STRING PAVFile, INT FileLocation, INT ButtonMask, STRING ObjName)
+	OBJECT hPA;
+	INT error;
+	INT errorLevelOld;
+	INT timeStart = SysTime();
+	// Wait for On Page Shown event to be triggered
+	WHILE ((PageInfo(25) = "0") AND ((SysTime() - timeStart) < c_PA_MAX_LOADTIME_MS)) DO
+		SleepMS(100);
+	END
+
+	// enable user error checking to allow the caller continues to run upon error
+	errorLevelOld = ErrSetLevel(1);
+	IsError();		// clear existing error
+
+	hPA = ObjectByName(ObjName);
+	error = IsError();
+	IF ObjectHasInterface(hPA, "IProcessAnalyst") THEN
+		// Do not treat as error if PAVFile is not specified
+		IF ("" <> PAVFile) THEN
+			_ObjectCallMethod(hPA, "LoadFromFile", PAVFile, FileLocation);
+			error = IsError();
+		ELSE
+			error = 0;
+		END
+		IF error = 0 THEN
+			// removing buttons according to the ButtonMask
+			IF (ButtonMask BITAND 1) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_LoadConfig");
+			END
+			IF (ButtonMask BITAND 2) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_SaveConfig");
+			END
+			IF (ButtonMask BITAND 4) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_Print");
+			END
+			IF (ButtonMask BITAND 8) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_CopyToClipboard");
+			END
+			IF (ButtonMask BITAND 16) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_CopyToFile");
+			END
+			IF (ButtonMask BITAND 32) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_AddPen");
+			END
+			IF (ButtonMask BITAND 64) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_RemovePen");
+			END
+			IF (ButtonMask BITAND 128) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_Properties");
+			END
+			IF (ButtonMask BITAND 256) THEN
+				_ToolbarButtonRemove(hPA, "Citect_Command_Help");
+			END
+		END
+	ELSE
+		error = IsError();	// Object has no interface
+	END
+	IF (0 <> error) THEN
+		ErrSetHw(2, error, 0);
+	END
+
+	IsError();	// clear existing error
+	ErrSetLevel(errorLevelOld);
+
+	RETURN error;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		PageProcessAnalystPens
+//
+//	SUMMARY:
+//		Displays a Process Analyst page (in the same window) preloaded with 
+//		the pre-defined Process Analyst View (PAV) file, and then override the
+//		pens on the specfied pane (default to the 1st pane) with the specified
+//		trend (or variable) tags.
+//
+//	PARAMS:
+//
+//		Page			- Name of the page based on a ProcessAnalyst template
+//		
+//		Tag1			- The first trend (or variable) tag to be assinged to PA
+//		Tag2			- (Optional) The second trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag3			- (Optional) The third trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag4			- (Optional) The fourth trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag5			- (Optional) The fifth trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag6			- (Optional) The sixth trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag7			- (Optional) The seventh trend (or variable) tag to be assinged to PA, default value is ""
+//		Tag8			- (Optional) The eighth trend (or variable) tag to be assinged to PA, default value is ""
+//		ButtonMask		- (Optional) bit mask for removing command buttons from the PA UI, default value is 0
+//							refer the same parameter in PageProcessAnalyst()
+//		ObjName			- (Optional) The name of the PA object on the page,
+// 							if not specified or blank, it is defaulted to the 1st PA object name used in the provided PA templates
+//		Pane			- (Optional) The Pane to be overridden with specified trend (or variable) tag,
+//							if not specified, it is defaulted to 1 for the 1st Pane
+//							if the specified pane does not exist, a new pane will be created automatically
+//		PAVFile			- (Optional) The pre-defined PAV file, default value is ""
+//							If a PAV file is specified, it will be loaded first, pens on the given pane will 
+//							be overridden with those specified in the tags argument, but pens on other panes will 
+//							not be affected. If no PAV file is specified, pens on all panes will be removed, and 
+//							only the pens specified in the tags argument will be loaded.
+//		FileLocation	- (Optional) The location code of PAV file, default value is 0, see PA doc LoadFromFile() for details.
+//			
+//	RETURNS: 
+//		Zero (0) if the page is successfully displayed, otherwise an error is returned.
+//
+//	REMARKS:
+//		If parameter, Page, is set to blank, it will be defaulted to value specified by Citect.ini parameter
+//		[Page] ProcessAnalystPage. The default value of this parameter is "ProcessAnalyst".
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION PageProcessAnalystPens(STRING Page,
+										STRING Tag1, STRING Tag2 = "", STRING Tag3 = "", STRING Tag4 = "", STRING Tag5 = "", STRING Tag6 = "", STRING Tag7 = "", STRING Tag8 = "",
+										INT ButtonMask = 0, STRING ObjName = "", INT Pane = 1,
+										STRING PAVFile = "", STRING FileLocation = 0)
+	INT error;
+
+	IF ("" = Page) THEN
+		// Get pre-configured page name from INI
+		Page = ParameterGet("Page", "ProcessAnalystPage", "ProcessAnalyst");
+	END
+
+	IF ("" = ObjName) THEN
+		// assume pre-configured object name from template
+		ObjName = c_PA_DEFAULT_OBJNAME_1;
+	END
+
+	error = ProcessAnalystSelect(-3, Page, ObjName, "", ButtonMask, PAVFile, FileLocation);
+	IF (0 = error) THEN
+		ProcessAnalystSetPen(-1, Tag1, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag2, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag3, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag4, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag5, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag6, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag7, "-2", Pane);
+		ProcessAnalystSetPen(-1, Tag8, "-2", Pane);
+
+		error = PageDisplay(Page);
+	ELSE
+		PageDisplay(Page);
+	END
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ProcessAnalystSetPen
+//
+//	SUMMARY:
+//		Sets the trend (or variable) tag to a pen in the Process Analyst object. The Data point
+//		for the specified pen changes to the specified tag and the display data is
+//		refreshed. The trend (or variable) tag must be in the operator's area to be displayed.
+//		If outside of the operator's area, data is not displayed.
+//
+//	PARAMS:
+//
+//		Pen				- The pen for which the trend (or variable) tag will be changed.
+//							< 0		- The first available pen
+//							0		- The pen currently selected
+//									(When ObjName is set to -2, it is assigned to the first availabe pen)
+//							> 0		- pen number of the specified Pane.
+//									(When ObjName is set to -2, only up to 8 pens (in total) can be
+//									specified, and each pen is identified by the pen number and each of
+//									them can be assigned to different pane)
+//		Tag				- The trend (or variable) tag to be assigned to the pen
+//		ObjName			- (Optional) The object name of the Process Analyst object,
+//							if not specified or "", it is defaulted to the 1st PA object named used in the provided PA templates
+//							Any vaild object name for the PA currently displayed, the specified pen will be changed immediately
+//							-2, the pen is changed in the special object setup by the ProcessAnalystSelect() function.
+//		Pane			- (Optional) The Pane to be overridden with specified trend (or variable) tag,
+//							if not specified, it is defaulted to 1 for the 1st Pane
+//							if the 1st pane is specified and it does not exist, it will be created automatically
+//			
+//	RETURNS: 
+//		Zero (0) if the pen is successfully assigned, otherwise an error is returned.
+//
+//	REMARKS:
+//		When ObjName is specified to -2, the pen is assigned to the special object set up by ProcessAnalystSelect() function.
+//		The change do not take effect until the specified page is displayed (or re-displayed).
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ProcessAnalystSetPen(INT Pen, STRING Tag, STRING ObjName = "", INT Pane = 1)
+	INT error = 0;
+	INT errorLevelOld;
+	OBJECT hPA;
+	OBJECT hPanes;
+	OBJECT hPane;
+	INT hSelectCache;
+
+	// Ignore empty Tag, and change Tag specified as "!" to be empty tag and pass to lower function for deletion
+	IF ("" = Tag) THEN
+		RETURN 274;
+	ELSE IF ("!" = Tag) THEN
+		Tag = "";
+	END END
+
+	IF (ObjName = "-2") THEN
+		// set pen information according to storage set up by the pa select function
+		hSelectCache = _PA_SelectCache_GetHnd(-2);
+		IF (hSelectCache < 0) THEN
+			RETURN 274;
+		END
+		error = _PA_SelectCache_SetPen(hSelectCache, Pane, Pen, Tag);
+	ELSE
+		// Set pen to the object
+		IF (ObjName = "") THEN
+			ObjName = c_PA_DEFAULT_OBJNAME_1;
+		END
+		hPA = ObjectByName(ObjName);
+		IF (ObjectHasInterface(hPA, "IProcessAnalyst")) THEN
+			error = _PA_Object_SetPen(hPA, Pane, Pen, Tag);
+		ELSE
+			error = 355;		// object has no interface
+		END
+	END
+	
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ProcessAnalystSelect
+//
+//	SUMMARY:
+//		Sets up a page for a Process Analsyt (PA) object. This function allows
+//		you to set up a PA object before the page is displayed. You can therefore
+//		use a single PA page to display any trend in the project by selecting the
+//		trend first, and then displaying the PA page.
+//		Call this function and a set of ProcessAnalystSetPen() functions before
+//		you display a PA page. When the PA page is displayed, all pens set by the
+//		ProcessAnalystSetPen() functions are displayed. You can use the
+//		ProcessAnalystSelect() function to configure different set of pens to be
+//		displayed on one generic PA page (A set of PA templates are provided
+//		to build this page).
+//
+//	PARAMS:
+//
+//		Window			- The window number (returned from the WinNumber function)
+//							-3	- for the current window
+//							-2	- for the next window displayed
+//		Page			- The name of the page that displays the Process Analyst object
+//							Only one page can be selected per window.
+//							If a different page is specified in subsequent call before any page is displayed,
+//							then the trend (or variable) tags will only be restored on the last page specified.
+//		ObjName			- (Optional) The name of the PA object on the page,
+// 							if not specified or blank, it is defaulted to the 1st PA object name used in the provided PA templates
+//		ClusterName		- (Optional) The name of the cluster that is associated
+//							with any trend (or variable) tag for this PA. This is optional if
+//							you have one cluster or are resolving the trend via
+//							the current cluster context. The argument is enclosed in quotation marks "".
+//
+//		ButtonMask		- (Optional) bit mask for removing command buttons from the PA UI, default value is 0
+//							refer the same parameter in PageProcessAnalyst()
+//		PAVFile			- (Optional) The pre-defined PAV file, default value is ""
+//							When PAV file is not specified, only the trend (or variable) tags specified in this function will be shown.
+//							When PAV file is specified, the specified trend (or variable) tags will be added to the existing pens
+//		FileLocation	- (Optional) The location code of PAV file, default value is 0, see PA doc LoadFromFile() for details.
+//			
+//	RETURNS: 
+//		Zero (0) if the page is successfully displayed, otherwise an error is returned.
+//
+//	REMARKS:
+//		Trend functions used after the TrnSelect() function must use the special
+//		value -2 as their ObjName.
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ProcessAnalystSelect(INT Window, STRING Page, STRING ObjName = "", STRING ClusterName = "",
+									INT ButtonMask = 0, STRING PAVFile = "", INT FileLocation = 0)
+	INT error = 0;
+	INT hSelectCache;
+
+	// Check arguments, and provide defaults if appropriate
+	IF ("" = Page) THEN
+		RETURN 274;		// invalid page
+	END
+
+	// allocate slot for trend select cache for specified window
+	IF (-2 = Window) THEN
+		m_PA_SelectCache_NextWindow_Used = 1;
+	ELSE IF (-3 = Window) THEN
+		Window = WinNumber();
+	END END
+	hSelectCache = _PA_SelectCache_GetHnd(Window);
+	_PA_SelectCache_SetWindow(Window);
+
+	IF (hSelectCache < 0) THEN
+		RETURN 274;
+	END
+
+	IF ("" = ObjName) THEN
+		ObjName = c_PA_DEFAULT_OBJNAME_1;
+	END
+
+	IF ("" = ClusterName) THEN
+		ClusterName = PageInfo(26);
+	END
+
+	// store trend information
+	error = _PA_SelectCache_SetPageDetail(hSelectCache, Page, ObjName, ClusterName, ButtonMask, PAVFile, FileLocation);
+
+	// set up event handler to retreive this information whenever a page is opened
+	IF (m_PA_SelectCache_PageOpen_OnEvent < 0) THEN
+		m_PA_SelectCache_PageOpen_ChainEvent = GetEvent(8);
+		IF (OnEvent(8, _ProcessAnalyst_PageOpen) = 0) THEN
+			m_PA_SelectCache_PageOpen_OnEvent = GetEvent(8);
+		END
+	END
+	
+	RETURN error;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	Private Functions (for PA display)
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME
+//		_ToolbarSeparatorRemove
+//
+//	SUMMARY:
+//		Remove the toolbar separator at index given, and
+//		double checking the button to ensure it is of the type
+//		"Separator" before the removal
+//				
+//	PARAMS:
+//		hButtons	- handle to the buttons
+//		index		- the position of the button
+//			
+//  RETURNS: 
+//		NIL
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+FUNCTION _ToolbarSeparatorRemove(OBJECT hButtons, INT index)
+	OBJECT	hButton = _ObjectCallMethod(hButtons, "get_Item", index);
+	STRING	cmdID = _ObjectGetProperty(hButton, "CommandId");
+	IF cmdID = "Citect_Command_Separator" THEN
+		_ObjectCallMethod(hButtons, "Remove", index);
+	END
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME
+//		_ToolbarButtonRemove
+//
+//	SUMMARY:
+//		Set the enable/disabled state of a command
+//				
+//	PARAMS:
+//		hPA			- handle to the PA
+//		sCommandID	- the ID of the command to Remove
+//			
+//  RETURNS: 
+//		error code if the given command is not on the main toolbar, otherwise
+//		the return code of the ToolbarButtons.Remove() method 
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _ToolbarButtonRemove(OBJECT hPA, STRING sCommandID)
+	OBJECT 	hToolbars 		= _ObjectGetProperty(hPA, "Toolbars");
+	OBJECT 	hMainToolbar 	= _ObjectCallMethod(hToolbars, "get_Item", 1);
+	OBJECT 	hButtons		= _ObjectGetProperty(hMainToolbar , "Buttons");
+	INT    	nCount 			= _ObjectGetProperty(hButtons, "Count");
+	INT	   	idx;
+	OBJECT	hButton;
+	STRING	cmdID;
+	INT		error;
+	INT		afterSeparator = 1;
+	FOR idx = 1 TO nCount DO
+		hButton = _ObjectCallMethod(hButtons, "get_Item", idx);
+		cmdID = _ObjectGetProperty(hButton, "CommandId");
+		IF cmdID = "Citect_Command_Separator" THEN
+			// a separator is found
+			afterSeparator = 1;
+		ELSE
+			// a working command is found
+			IF cmdID = sCommandID THEN
+				// the command matches our search
+				
+				// remove the separator either before or after the button 
+				// if there was already
+				IF afterSeparator THEN
+					IF idx = nCount THEN
+						error = _ObjectCallMethod(hButtons, "Remove", idx);
+						_ToolbarSeparatorRemove(hButtons, idx - 1);
+					ELSE
+						_ToolbarSeparatorRemove(hButtons, idx + 1);
+						error = _ObjectCallMethod(hButtons, "Remove", idx);
+					END
+				ELSE
+					error = _ObjectCallMethod(hButtons, "Remove", idx);
+				END
+				
+				// Forcing the toolbar to refresh if it was visible
+				IF _ObjectGetProperty(hMainToolbar, "Visible") THEN
+					_ObjectSetProperty(hMainToolbar, "Visible", 0);
+					_ObjectSetProperty(hMainToolbar, "Visible", 1);
+				END
+				
+				RETURN error;
+			END
+			afterSeparator = 0;
+		END
+		
+	END
+	RETURN 274;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	Private Functions (for setting pens to Process Analyst page)
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_ProcessAnalyst_PageOpen
+//
+//	SUMMARY:
+//		Callback function for the Citect PageOpen event to load trend (or variable)
+//		tags to the Process Analyst object according to the information set up by
+//		functions ProcessAnalystSelect() and ProcessAnalystSetPen()
+//
+//	PARAMS:
+//
+//		None
+//	
+//	RETURNS: 
+//		Zero (0).
+//
+//	REMARKS:
+//		The function is called back by Citect reserved event set up by
+//		statement OnEvent(8, fn).
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _ProcessAnalyst_PageOpen()
+	INT hSelectCache;
+
+	// assign pens to PA if pen information from stored variable match page contents
+	hSelectCache = _PA_SelectCache_GetHnd(-2, PageInfo(0));
+	IF (hSelectCache >= 0) THEN
+		// start new task to assign pens to PA from select cache
+		TaskNew("_PA_SelectCache_RestorePens", IntToStr(hSelectCache), 1);
+	END
+
+	// chain existing event
+	IF (m_PA_SelectCache_PageOpen_ChainEvent > -1) THEN
+		ChainEvent(m_PA_SelectCache_PageOpen_ChainEvent);
+	END
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_Object_SetPen
+//
+//	SUMMARY:
+//		Sets the trend (or variable) tag to a pen in the Process Analyst object that is
+//		currently displayed on the page.
+//
+//	PARAMS:
+//
+//		hPA				- The object handle to the Process Analyst
+//		Pane			- The Pane where the pen is located
+//							if the specified pane does not exist, a new pane will be created automatically
+//		Pen				- The pen for which the trend (or variable) tag will be changed.
+//							refer the same parameter in ProcessAnalystSetPen()
+//		Tag				- The trend (or variable) tag to be assigned to the pen
+//		Cluster			- (Optional) The cluster name for the tag if it is not already included in the tag name
+//			
+//	RETURNS: 
+//		Zero (0) if the pen is successfully assigned, otherwise an error is returned.
+//
+//	REMARKS:
+//		Unlike trend object, PA does not allocate pens to fixed pen numbers.
+//		In PA, pen numbers are simply the enumeration of the pens collection at a time.
+//		If the pen number is larger than the currently collection, the pen will
+//		be appended to the end of the collection, and its final pen number may be
+//		smaller than the one specified.
+//		Similarly, when a pen is deleted (by specifiying empty tag to an existing
+//		pen number), the pen numbers of pens after the deleted pen will be
+//		automatically decremented.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_Object_SetPen(OBJECT hPA, INT Pane, INT Pen, STRING Tag, STRING Cluster = "")
+	INT error = 0;
+	INT errorLevelOld;
+	OBJECT hPanes;
+	OBJECT hPane;
+	OBJECT hPens;
+	OBJECT hPen;
+	STRING fullTag;
+	INT instantTrend = 0;
+
+	// assume hPA is valid, do not check again
+	hPanes = _ObjectGetProperty(hPA, "Panes");
+	IF (NOT ObjectIsValid(hPanes)) THEN
+		RETURN 355;		// generic automation exception
+	END
+
+	// retrieve Pane
+	errorLevelOld = ErrSetLevel(1);
+	IF (Pane < 1) THEN
+		Pane = 1;
+	END
+	IF (Pane > _ObjectGetProperty(hPanes, "Count")) THEN
+		// look for the automatically added pane
+		hPane = _ObjectCallMethod(hPanes, "get_ItemByName", "(New Pane)");
+		IF (NOT ObjectIsValid(hPane)) THEN
+			// create new pane automatically
+			hPane = _ObjectCallMethod(hPanes, "Create", "(New Pane)");
+		END
+	ELSE
+		hPane = _ObjectCallMethod(hPanes, "get_Item", Pane);
+	END
+	ErrSetLevel(errorLevelOld);
+	IF (NOT ObjectIsValid(hPane)) THEN
+		RETURN 274;		// Invalid Pane
+	END
+
+	// all pens will be added for analog trend (or variable) tag
+	errorLevelOld = ErrSetLevel(1);
+	hPens = _ObjectGetProperty(hPane, "Pens");
+	IF (ObjectIsValid(hPens)) THEN
+		SELECT CASE Pen
+		CASE IS < 0
+			// create new pen
+			hPen = _PA_Object_CreatePen(hPens);
+		CASE 0
+			// replace the selected Pen
+			hPen = _ObjectGetProperty(hPA, "LastSelectedPen");
+			IF (NOT ObjectIsValid(hPen)) THEN
+				// create new pen
+				hPen = _PA_Object_CreatePen(hPens);
+			END
+		CASE ELSE
+			// retrieve exisitng pen
+			hPen = _ObjectCallMethod(hPens, "get_Item", Pen);
+			IF (NOT ObjectIsValid(hPen)) THEN
+				// create new pen if failed to find existing pen
+				hPen = _PA_Object_CreatePen(hPens);
+			END
+		END SELECT
+		IF (ObjectIsValid(hPen)) THEN
+			IF ("" <> Tag) THEN
+				// check whether it is trend (or variable) tag, if not it must be set as InstantTrend
+				fullTag = _TagnameGetPart(Tag, 0, Cluster);
+				IF (TrnInfo(fullTag, 1) = "") THEN
+					instantTrend = 1;
+					IF (TagInfo(Tag, 18) <> "") THEN
+						// use tag name directly if it can be resolved alone
+						fullTag = Tag;
+					END
+				END
+
+				// set contents to the pen
+				error = _ObjectSetProperty(hPen, "DataServer", "localhost");
+				error = _ObjectSetProperty(hPen, "DataPoint", fullTag);
+				error = _OBJECTSetProperty(hPen, "InstantTrend", instantTrend);
+			ELSE
+				// deleten pen
+				error = _ObjectCallMethod(hPen, "Delete");
+			END
+		ELSE
+		error = 355;	// Generic automation exception
+		END
+	ELSE
+		error = 355;	// Generic automation exception
+	END
+	ErrSetLevel(errorLevelOld);
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_Object_CreatePen
+//
+//	SUMMARY:
+//		Creates a new pen and add it to the specified Pens collection.
+//
+//	PARAMS:
+//
+//		hPens			- The object handle to the Pens object within a PA
+//			
+//	RETURNS: 
+//		The object handle to the newly created pen, otherwise -1 is returned.
+//
+//	REMARKS:
+//		The line colour of the new pen is determined by colour array c_PA_PenLineColor[].
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+OBJECT FUNCTION _PA_Object_CreatePen(OBJECT hPens)
+	OBJECT hPen;
+	INT pen;
+	INT color;
+
+	hPen = _ObjectCallMethod(hPens, "Create", c_PA_PenType_ANALOG, c_PA_PenNameMode_Tag);
+	pen = _ObjectGetProperty(hPens, "Count");
+	color = c_PA_PenLineColor[pen MOD c_PA_PenLineColor_Max];
+	_ObjectSetProperty(hPen, "LineColor", color);
+	RETURN hPen;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_Object_ClearPens
+//
+//	SUMMARY:
+//		Clears all pens of the specfiied pane in PA.
+//
+//	PARAMS:
+//
+//		hPA			- The object handle to the Process Analyst currrently displayed
+//		Pane		- The pane number of the pane to be cleared.
+//						< 1		- All panes will be cleared
+//			
+//	RETURNS: 
+//		Zero (0) if the pens are successfully cleared, otherwise an error is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_Object_ClearPens(OBJECT hPA, INT Pane)
+	INT error = 0;
+	OBJECT hPanes;
+	OBJECT hPane;
+	OBJECT hPens;
+	INT PaneEnd;
+
+	// assume hPA is valid, do not check again
+	hPanes = _ObjectGetProperty(hPA, "Panes");
+	IF (NOT ObjectIsValid(hPanes)) THEN
+		RETURN 355;		// generic automation exception
+	END
+
+	// retrieve Pane
+	IF (Pane < 1) THEN
+		Pane = 1;
+		PaneEnd = _ObjectGetProperty(hPanes, "Count");
+	ELSE
+		PaneEnd = Pane;
+	END
+	WHILE (Pane <= PaneEnd) DO
+		hPane = _ObjectCallMethod(hPanes, "get_Item", Pane);
+		IF (NOT ObjectIsValid(hPane)) THEN
+			RETURN 274;		// Invalid Pane
+		END
+
+		// retrieve Pens
+		hPens = _ObjectGetProperty(hPane, "Pens");
+		IF (NOT ObjectIsValid(hPens)) THEN
+			RETURN 355;		// generic automation exception
+		END
+
+		// remove all pens
+		error = _ObjectCallMethod(hPens, "RemoveAll");
+
+		Pane = Pane + 1;
+	END
+
+	RETURN error;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_Object_GetPanesCount
+//
+//	SUMMARY:
+//		Get number of panes on given PA object 
+//
+//	PARAMS:
+//
+//		hPA		- Handle to PA
+//			
+//	RETURNS: 
+//		> 0		- Number of panes
+//		0		- No panes on PA or an error is occurred
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_Object_GetPanesCount(OBJECT hPA)
+	INT error = 0;
+	INT panesReturn = 0;
+	OBJECT hPanes; 
+	
+	// assume hPA is valid, do not check again
+	hPanes = _ObjectGetProperty(hPA, "Panes");
+	IF (NOT ObjectIsValid(hPanes)) THEN
+		ErrTrap(355, 0);			// generic automation exception
+		RETURN 0;
+	END
+	
+	// Return the number of panes of the given object 
+	RETURN _ObjectGetProperty(hPanes, "Count");
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_Object_GetPensCount
+//
+//	SUMMARY:
+//		Get number of pens on given pane 
+//
+//	PARAMS:
+//
+//		hCache		- Handle to Object Cache
+//		Pane		- Pane number on PA
+//			
+//	RETURNS: 
+//		> 0			- Number of pens on given pane
+//		0			- No pens on given pane or an error is occurred.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_Object_GetPensCount(OBJECT hPA, INT Pane )
+	OBJECT hPanes; 
+	OBJECT hPane;
+	OBJECT hPens;
+	
+	// assume hPA is valid, do not check again
+	hPanes = _ObjectGetProperty(hPA, "Panes");
+	IF (NOT ObjectIsValid(hPanes)) THEN
+		ErrTrap(355, 0);			// generic automation exception
+		RETURN 0;		
+	END
+	
+	// get handle of the pane
+	hPane = _ObjectCallMethod(hPanes, "get_Item", Pane);
+	IF (NOT ObjectIsValid(hPane)) THEN
+		ErrTrap(274, 0);			// Invalid Pane
+		RETURN 0;			
+	END
+
+	// retrieve Pens
+	hPens = _ObjectGetProperty(hPane, "Pens");
+	IF (NOT ObjectIsValid(hPens)) THEN
+		ErrTrap(355, 0);			// generic automation exception
+		RETURN 0;					
+	END	
+	
+	// Return size of the given pane 
+	RETURN _ObjectGetProperty(hPens, "Count");
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_GetHnd
+//
+//	SUMMARY:
+//		Gets the handle to the special cache of the specified window set up by
+//		function ProcessAnalystSelect().
+//
+//	PARAMS:
+//
+//		Window			- The window number where the cache information will be
+//							restored to when a new page is displayed on that window
+//							< 0		- get target window set up by ProcessAnalystSelect()
+//										called by the current window
+//		Page			- The page name where the cache information will be restored
+//			
+//	RETURNS: 
+//		The handle to the select cache of the target window, otherwise -1 is returned.
+//
+//	REMARKS:
+//		Do not specify Page name when setting up the select cache.
+//			(as we need to get the handle before page name is set up)
+//		Do specify Page name when restoring the pens.
+//			(as we need to check if the newly displayed page is set up in cache)
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_GetHnd(INT Window = -1, STRING Page = "")
+	INT hSelectCache = -1;
+
+	IF (Window < 0) THEN
+		// retrieve cache according to the current window number
+		IF ("" <> Page) THEN
+			// check if page name matches, only go into this path with displaying the page
+			IF (m_PA_SelectCache_NextWindow_Used) THEN
+				hSelectCache = c_PA_SELECTCACHE_HND_NEXTWINDOW;
+				IF (_PagenameEqual(Page, m_PA_SelectCache_Page[hSelectCache])) THEN
+					RETURN hSelectCache;
+				END
+			END
+			Window = WinNumber();
+			hSelectCache = _PA_SelectCache_GetHndFromWindow(Window);
+		ELSE
+			// retrieve cache according to the previous PA select call
+			Window = WinNumber();
+			IF (Window < c_WINDOW_MAX) THEN
+				Window = m_PA_SelectCache_Window[Window];
+				hSelectCache = _PA_SelectCache_GetHndFromWindow(Window);
+			END
+			IF (hSelectCache < 0) THEN
+				// check if pens are selected for next window
+				IF (m_PA_SelectCache_NextWindow_Used) THEN
+					RETURN c_PA_SELECTCACHE_HND_NEXTWINDOW;
+				ELSE
+					hSelectCache = -1;
+				END
+			END
+		END
+	ELSE
+		hSelectCache = _PA_SelectCache_GetHndFromWindow(Window);
+	END
+
+	// check if found select cache is valid
+	IF ((hSelectCache < 0) OR (hSelectCache >= c_PA_SELECTCACHE_HND_MAX)) THEN
+		RETURN -1;
+	END
+
+	// check if page name matches
+	IF ("" <> Page) THEN
+		IF (NOT _PagenameEqual(Page, m_PA_SelectCache_Page[hSelectCache])) THEN
+			hSelectCache = -1;
+		END
+	END
+
+	RETURN hSelectCache;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_GetHndFromWindow
+//
+//	SUMMARY:
+//		Get the handle of the PA select cache based on the target window
+//			
+//	PARAMS:
+//		Window		- The window number fo the target window that displays PA
+//			
+//	RETURNS: 
+//		The handle to the PA select cache of the specified window, otherwise -1 is returned
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_GetHndFromWindow(INT Window)
+	INT list, handle;
+	INT winSearch, foundFreeWindow;
+
+	IF ((Window <0) OR (Window >= c_WINDOW_MAX)) THEN
+		RETURN -1;
+	END
+	// retrieve instance handle from cache
+	IF (m_PA_SelectCache_Hnd[Window] >= 0) THEN
+		RETURN m_PA_SelectCache_Hnd[Window];
+	END
+	// Create a new list / retrieve existing list for allocating handles
+	list = ItemListNew("_PA_SelectCache", c_PA_SELECTCACHE_HND_MAX);
+	IF (list < 0) THEN
+		RETURN -1;
+	END
+	handle = ItemFind(list, Window);
+	IF (handle < 0) THEN
+		// allocate new handle to the list
+		handle = ItemAdd(list, Window);
+		IF (handle < 0) THEN
+			// if list is full, find item with invalid window number and replace it
+			foundFreeWindow = 0;
+			handle = ItemFirst(list);
+			WHILE ((NOT foundFreeWindow) AND (handle >= 0)) DO
+				winSearch = ItemValue(list, handle);
+				WinSelect(winSearch);
+				IF (WinNumber() <> winSearch) THEN
+					// window no longer exists, replace it with current window number
+					foundFreeWindow = 1;
+					ItemValue(list, handle, Window);
+					// clear contents set up by original window
+					_PA_SelectCache_Clear(handle, 1);
+					// cut link of the original window
+					m_PA_SelectCache_Hnd[winSearch] = -1;
+					WinSelect(Window);
+				ELSE
+					handle = ItemNext(list, handle);
+				END
+			END
+		END
+		IF (handle >= 0) THEN
+			m_PA_SelectCache_Hnd[Window] = handle;
+		END
+	END
+	RETURN handle;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_SetWindow
+//
+//	SUMMARY:
+//		Sets the target window where the information stored in the select cache
+//		will be restored to. This is called by ProcessAnalystSelect().
+//
+//	PARAMS:
+//
+//		Window			- The window number
+//			
+//	RETURNS: 
+//		Zero (0) if the target window is successfully set, otherwise -1 is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_SetWindow(INT Window)
+	INT caller = WinNumber();
+
+	IF ((caller >= 0) AND (caller < c_WINDOW_MAX)) THEN
+		m_PA_SelectCache_Window[caller] = Window;
+	ELSE
+		RETURN 274;
+	END
+
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_SetPageDetail
+//
+//	SUMMARY:
+//		Sets page-wise information about the trend pens to the specified select
+//		cache (of the target window). This is called by function ProcessAnalystSelect().
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//		Page			- The page to be displayed on the target window
+//		Cluster			- The default cluster for the trend pens
+//		ButtonMask		- (Optional) The button mask for the PA, default value is 0, i.e. no mask
+//		PAVFile			- (Optional) The PAV file to be loaded, default value is ""
+//		FileLocation	- (Optional) The file location of the PAV file, default value is 0 (local)
+//			
+//	RETURNS: 
+//		Zero (0) if the target window is successfully set, otherwise -1 is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_SetPageDetail(INT hSelectCache, STRING Page, STRING ObjName, STRING Cluster, INT ButtonMask = 0, STRING PAVFile = "", INT FileLocation = 0)
+	INT error = 274;
+	INT hObjectCache;
+
+	IF ((hSelectCache >= 0) AND (hSelectCache <= c_PA_SELECTCACHE_HND_NEXTWINDOW)) THEN
+		m_PA_SelectCache_Page[hSelectCache] = Page;
+
+		hObjectCache = _PA_ObjectCache_GetHnd(hSelectCache, ObjName);
+		IF (hObjectCache >= 0) THEN
+			m_PA_SelectCache_ActiveObjName[hSelectCache] = ObjName;
+
+			m_PA_ObjectCache_SelectCacheHnd[hObjectCache] = hSelectCache;
+			m_PA_ObjectCache_ObjName[hObjectCache] = ObjName;
+			m_PA_ObjectCache_Cluster[hObjectCache] = Cluster;
+			m_PA_ObjectCache_ButtonMask[hObjectCache] = ButtonMask;
+			m_PA_ObjectCache_PAVFile[hObjectCache] = PAVFile;
+			m_PA_ObjectCache_FileLocation[hObjectCache] = FileLocation;
+			error = 0;
+		END
+	END
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_SetPen
+//
+//	SUMMARY:
+//		Sets information about the trend pens to the select cache (of
+//		(the target window). This is called by ProcessAnalystSelect().
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//		Pane			- The Pane where the pen is located
+//							if the 1st pane is specified and it does not exist, it will be created automatically
+//		Pen				- The pen for which the trend (or variable) tag will be changed.
+//							refer the same parameter in ProcessAnalystSetPen()
+//		Tag				- The trend (or variable) tag to be assigned to the pen
+//			
+//	RETURNS: 
+//		Zero (0) if the target window is successfully set, otherwise -1 is returned.
+//
+//	REMARKS:
+//		The select cache mimics the pen number enumeration of PA.
+//		Please refer to the REMARKS of _PA_Object_SetPen() about the difference between the
+//		pen number in trend object and enumeration of pen number in PA.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_SetPen(INT hSelectCache, INT Pane, INT Pen, STRING Tag)
+	INT error = 274;
+	INT hObjectCache;
+	
+	IF ((hSelectCache < 0) OR (hSelectCache > c_PA_SELECTCACHE_HND_NEXTWINDOW)) THEN
+		RETURN error;
+	END
+
+	// retrieve object name from select cache
+	hObjectCache = _PA_ObjectCache_GetHnd(hSelectCache, m_PA_SelectCache_ActiveObjName[hSelectCache]);
+	IF (hObjectCache < 0) THEN
+		RETURN error;
+	END
+
+	IF ((Pen < 1) OR (Pen > m_PA_ObjectCache_PenCount[hObjectCache])) THEN
+		// add new pen
+		Pen = m_PA_ObjectCache_PenCount[hObjectCache];
+	ELSE
+		// replace existing pen
+		Pen = Pen - 1;
+	END
+	IF ((Pen >= 0) AND (Pen < c_PA_SELECTCACHE_PEN_MAX)) THEN
+		m_PA_ObjectCache_PenPane[hObjectCache][Pen] = Pane;
+		m_PA_ObjectCache_PenTag[hObjectCache][Pen] = Tag;
+
+		IF ("" = Tag) THEN
+			// pack cache if pen is deleted
+			WHILE (Pen < m_PA_ObjectCache_PenCount[hObjectCache] - 1) DO
+				m_PA_ObjectCache_PenPane[hObjectCache][Pen] = m_PA_ObjectCache_PenPane[hObjectCache][Pen + 1];
+				m_PA_ObjectCache_PenTag[hObjectCache][Pen] = m_PA_ObjectCache_PenTag[hObjectCache][Pen + 1];
+				Pen = Pen + 1;
+			END
+			IF (Pen < m_PA_ObjectCache_PenCount[hObjectCache]) THEN
+				m_PA_ObjectCache_PenPane[hObjectCache][Pen] = 0;
+				m_PA_ObjectCache_PenTag[hObjectCache][Pen] = "";
+				m_PA_ObjectCache_PenCount[hObjectCache] = m_PA_ObjectCache_PenCount[hObjectCache] - 1;
+			END
+		ELSE IF (Pen >= m_PA_ObjectCache_PenCount[hObjectCache]) THEN
+			// a pen has been added, increment count
+			m_PA_ObjectCache_PenCount[hObjectCache] = m_PA_ObjectCache_PenCount[hObjectCache] + 1;
+		END END
+		error = 0;
+	END
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_Clear
+//
+//	SUMMARY:
+//		Clears all information stored in the specified select cache.
+//		This is called by _PA_SelectCache_RestorePens() after the trend pens
+//		are restored.
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//		keepHandle		- (Optional) Keeps the handle to the select cache and
+//							clears the contents only, default = false (0)
+//			
+//	RETURNS: 
+//		Zero (0) if the target window is successfully set, otherwise -1 is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_SelectCache_Clear(INT hSelectCache, INT keepHandle = 0)
+	INT error = 0;
+	INT pen;
+	INT caller;
+	INT window;
+	INT list;
+	INT hObjectCache;
+
+	IF ((hSelectCache < 0 ) OR (hSelectCache > c_PA_SELECTCACHE_HND_NEXTWINDOW)) THEN
+		RETURN 274;
+	END
+
+	// clear select cache
+	m_PA_SelectCache_Page[hSelectCache] = "";
+	m_PA_SelectCache_ActiveObjName[hSelectCache] = "";
+
+	// clear object cache
+	hObjectCache = 0;
+	WHILE (hObjectCache < c_PA_OBJECTCACHE_HND_MAX) DO
+		IF (m_PA_ObjectCache_SelectCacheHnd[hObjectCache] = hSelectCache) THEN
+			m_PA_ObjectCache_ObjName[hObjectCache] = "";
+			m_PA_ObjectCache_Cluster[hObjectCache] = "";
+			m_PA_ObjectCache_ButtonMask[hObjectCache] = 0;
+			m_PA_ObjectCache_PAVFile[hObjectCache] = "";
+			m_PA_ObjectCache_FileLocation[hObjectCache] = 0;
+
+			pen = 0;
+			WHILE (pen < m_PA_ObjectCache_PenCount[hObjectCache]) DO
+				m_PA_ObjectCache_PenPane[hObjectCache][pen] = 0;
+				m_PA_ObjectCache_PenTag[hObjectCache][pen] = "";
+				pen = pen + 1;
+			END
+			m_PA_ObjectCache_PenCount[hObjectCache] = 0;
+
+			m_PA_ObjectCache_SelectCacheHnd[hObjectCache] = -1;
+		END
+		hObjectCache = hObjectCache + 1;
+	END
+
+	// clear link to the next window cache
+	IF (hSelectCache = c_PA_SELECTCACHE_HND_NEXTWINDOW) THEN
+		m_PA_SelectCache_NextWindow_Used = 0;
+	ELSE
+		// clear caller link to this cache
+		Window = WinNumber();
+		caller = 0;
+		WHILE (caller < c_WINDOW_MAX) DO
+			IF (m_PA_SelectCache_Window[caller] = Window) THEN
+				m_PA_SelectCache_Window[caller] = -1;
+			END
+			caller = caller + 1; 
+		END
+		IF (Window < c_WINDOW_MAX) THEN
+			m_PA_SelectCache_Hnd[Window] = -1;
+		END
+
+		// unallocate select cache that are based on window
+		IF (NOT keepHandle) THEN
+			ItemRemove(ItemListFind("_PA_SelectCache"), hSelectCache);
+		END
+	END
+
+	RETURN error;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_SelectCache_RestorePens
+//
+//	SUMMARY:
+//		Restores trend pens to the PA currently displayed on the page according
+//		to the information stored in the specified select cache.
+//		This is called by _ProcessAnalyst_PageOpen() event handler after the
+//		specified page is displayed on the specified window set up by function
+//		ProcessAnalystSelect().
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//			
+//	RETURNS: 
+//		Zero (0) if the target window is successfully set, otherwise -1 is returned.
+//
+//	REMARKS:
+//		This supposedly private function has been made to public scope to allow
+//		it be launched as new task, so that it will not block the event callback.
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION _PA_SelectCache_RestorePens(INT hSelectCache)
+	INT error = 0;
+	STRING objName;
+	STRING cluster;
+	INT pen;
+	INT pane;
+	STRING tag;
+	OBJECT hPA;
+	INT hObjectCache;
+	STRING pavFile;
+	INT fileLocation;
+	INT buttonMask;
+	
+	INT panesCount;
+	INT pensCount;
+	INT paneIndex;
+	INT penIndex;
+	
+	INT penIndexOnPane;
+	
+	IF ((hSelectCache < 0) OR (hselectCache > c_PA_SELECTCACHE_HND_NEXTWINDOW)) THEN
+		RETURN 274;
+	END
+
+	// restore all objects that belongs to the select cache
+	hObjectCache = 0;
+	WHILE (hObjectCache < c_PA_OBJECTCACHE_HND_MAX) DO
+		IF (m_PA_ObjectCache_SelectCacheHnd[hObjectCache] = hSelectCache) THEN
+			ObjName = m_PA_ObjectCache_ObjName[hObjectCache];
+		
+			// Load PAV file
+			pavFile = m_PA_ObjectCache_PAVFile[hObjectCache];
+			fileLocation = m_PA_ObjectCache_FileLocation[hObjectCache];
+			buttonMask = m_PA_ObjectCache_ButtonMask[hObjectCache];
+			error = ProcessAnalystLoadFile(pavFile, fileLocation, buttonMask, objName);	// This is a blocking function
+
+			IF (0 = error) THEN
+				hPA = ObjectByName(ObjName);
+				IF (ObjectHasInterface(hPA, "IProcessAnalyst")) THEN
+					cluster = m_PA_ObjectCache_Cluster[hObjectCache];
+		
+					IF ("" = pavFile) THEN
+						// clear existing pens of all panes if do not load file
+						_PA_Object_ClearPens(hPA, -1);
+						
+						// Add pens to the specified pane
+						pen = 0;
+						WHILE (pen < m_PA_ObjectCache_PenCount[hObjectCache]) DO
+							pane = m_PA_ObjectCache_PenPane[hObjectCache][pen];
+							tag = m_PA_ObjectCache_PenTag[hObjectCache][pen];
+							_PA_Object_SetPen(hPA, pane, -1, tag, cluster);
+							pen = pen + 1;
+						END
+						
+					ELSE
+						// Apply given data to existing Pens 
+						pen = 0;
+						WHILE (pen < m_PA_ObjectCache_PenCount[hObjectCache]) DO
+							pane = m_PA_ObjectCache_PenPane[hObjectCache][pen];
+							tag = m_PA_ObjectCache_PenTag[hObjectCache][pen];
+							
+							// This index of pen is recalculated for its pane number 
+							// because this "pen" variable doesn't restart over different panes. 
+							penIndexOnPane = _PA_ObjectCache_RecalculatePenIndexForPane(hObjectCache, pen);
+							
+							IF (penIndexOnPane > 0) THEN
+								// Overwrite data on existing pens (if no pen's existing, it creates a new one.)
+								_PA_Object_SetPen(hPA, pane, penIndexOnPane, tag, cluster);
+							END
+							
+							pen = pen + 1;
+						END
+					
+						// Wipe out only other pens in the affected panes
+						panesCount = _PA_Object_GetPanesCount(hPA);
+						
+						// for all panes 
+						FOR paneIndex = 1 TO panesCount DO
+							// get the number of pens for each pane 
+							pensCount = _PA_Object_GetPensCount(hPA, paneIndex)
+							
+							IF (pensCount) THEN
+								// get the number of pens for each pane in select cache 
+								pen = _PA_ObjectCache_GetNumberOfPensInPane(hObjectCache, paneIndex);
+
+								// If there is one or more pens newly added, wipe out other pens. 
+								// If there is no new pen at all on the pane, skip it.
+								IF (pen > 0) THEN
+									// Wipe out all data just after the index of newly applied pens from the select cache 
+									pen = pen + 1;
+									FOR penIndex = pen TO pensCount DO
+										// Delete pens. Do this multiple times for same index 
+										// because the pen index is automatically rearranged after every deletion.
+										_PA_Object_SetPen(hPA, paneIndex, pen, "", cluster);
+									END 
+								END
+							END
+						END
+					END
+				ELSE
+					error = 355;	// object has no interface
+				END
+			END
+		END
+		hObjectCache = hObjectCache + 1;
+	END
+
+	// clear select cache
+	_PA_SelectCache_Clear(hSelectCache);
+
+	RETURN error;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_ObjectCache_RecalculatePenIndexForPane
+//
+//	SUMMARY:
+//		Recalculate a pen index based on its pane number
+//		The index returned by this function will be identical to original
+//		PenIndex when there is only one pane in the given cache. 
+//
+//	PARAMS:
+//
+//		hCache		- Handle to Object Cache
+//		itemIndex	- Index of pen on Object Cache 
+//			
+//	RETURNS: 
+//		-1 			- Invalid parameter 
+//		Otherwise, it represents its new index for its pane number 
+//
+//	REMARKS:
+//		This function is used by _PA_SelectCache_RestorePens() for finding pen 
+//		indexes to overwrite tag information of existing pens on PA 
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_ObjectCache_RecalculatePenIndexForPane(INT hCache, INT itemIndex)
+	INT indexReturn = 1;
+	INT pen = 0;
+	INT paneOfItem = 0;
+
+	// Parameter Check 
+	IF (hCache < 0) OR (hCache >= c_PA_OBJECTCACHE_HND_MAX) THEN
+		RETURN -1;
+	END
+		
+	IF (itemIndex < 0) OR (itemIndex >= m_PA_ObjectCache_PenCount[hCache]) THEN
+		RETURN -1;
+	END
+
+	paneOfItem = m_PA_ObjectCache_PenPane[hCache][itemIndex];
+
+	// Traverse the cache and determine the lastest index for a new item 	
+	pen = 0;
+	WHILE (pen < itemIndex) DO
+		IF (paneOfItem = m_PA_ObjectCache_PenPane[hCache][pen]) THEN
+			indexReturn = indexReturn + 1;
+		END
+		
+		pen = pen + 1;
+	END	
+
+	RETURN indexReturn;
+END	
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_ObjectCache_GetNumberOfPensInPane
+//
+//	SUMMARY:
+//		Calculate how many pens exist on the given pane from the object cache 
+//
+//	PARAMS:
+//
+//		hCache		- Handle to Object Cache
+//		PaneGiven	- Pane number on PA
+//			
+//	RETURNS: 
+//		-1			- Invalid parameter 
+//		Otherwise, it represents number of pens on given pane
+//
+//	REMARKS:
+//		This function is used by _PA_SelectCache_RestorePens() to find & clear
+//		pens which are not found in the object cache. 
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_ObjectCache_GetNumberOfPensInPane(INT hCache, INT PaneGiven)
+	INT sizeReturn = 0;
+	INT pen;
+
+	// Parameter Check 	
+	IF (hCache < 0) OR (hCache >= c_PA_OBJECTCACHE_HND_MAX) THEN
+		RETURN -1;
+	END
+	
+	IF (PaneGiven < 1) THEN
+		RETURN -1;
+	END 
+	
+	// Check select cache from the beginning and count matching ones 
+	pen=0;
+	WHILE (pen < m_PA_ObjectCache_PenCount[hCache]) DO
+		IF (PaneGiven = m_PA_ObjectCache_PenPane[hCache][pen]) THEN
+			sizeReturn = sizeReturn + 1;
+		END
+	
+		pen = pen + 1;
+	END
+	
+	RETURN sizeReturn;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_ObjectCache_GetHnd
+//
+//	SUMMARY:
+//		Get a handle in the object cahce for the specified select cache and
+//		PA object. If the object name is already used in the cache. The existing
+//		cache handle will be returned, otherwise a free handle will be returned.
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//		ObjName			- The object name
+//			
+//	RETURNS: 
+//		Object cache handle (new or existing) for the specified PA object,
+//		otherwise -1 is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_ObjectCache_GetHnd(INT hSelectCache, STRING ObjName)
+	INT newIndex = -1;
+
+	// attempt to retrieve existing object
+	newIndex = _PA_ObjectCache_Find(hSelectCache, ObjName);
+
+	// find free object if failed
+	IF (newIndex < 0) THEN
+		newIndex = _PA_ObjectCache_Find(-1, "");
+	END
+	RETURN newIndex;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PA_ObjectCache_Find
+//
+//	SUMMARY:
+//		Return existing handle from select cache
+//
+//	PARAMS:
+//
+//		hSelectCache	- The handle to the select cache of the target window
+//		ObjName			- The object name
+//			
+//	RETURNS: 
+//		Object cache handle for the specified PA object, otherwise -1 is returned.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PA_ObjectCache_Find(INT hSelectCache, STRING ObjName)
+	INT hObjectCache = 0;
+
+	WHILE (hObjectCache < c_PA_OBJECTCACHE_HND_MAX) DO
+		IF (m_PA_ObjectCache_SelectCacheHnd[hObjectCache] = hSelectCache) THEN
+			IF (m_PA_ObjectCache_ObjName[hObjectCache] = ObjName) THEN
+				RETURN hObjectCache;
+			END
+		END
+		hObjectCache = hObjectCache + 1;
+	END
+	RETURN -1;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_TagnameGetPart
+//
+//	SUMMARY:
+//		Gets the specific part of a tag name.
+//
+//	PARAMS:
+//
+//		Tag			- The name of a tag. It could be a full tag name which
+//						includes the cluster name or tag name without cluster info
+//		Part		- The part of the tag name.
+//						0	- full tag name which includes its resolved cluster name (default)
+//						1	- resolved cluster name, or "" if cannot resolve
+//						2	- tag name without cluster information
+//		Cluster		- (Optional) default cluster name for tag name that
+//						does not contain cluster name
+//			
+//	RETURNS: 
+//		The specified part of a tag name.
+//
+//	REMARKS:
+//		When no cluster name is specified, it resolves to the cluster name
+//		specified to the current page context.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+STRING FUNCTION _TagnameGetPart(STRING Tag, INT Part = 0, STRING Cluster = "")
+	INT sep = StrSearch(0, Tag, ".");
+
+	SELECT CASE Part
+	CASE 0
+		// full name
+		IF (sep >= 0) THEN
+			RETURN Tag;
+		ELSE
+			IF ("" = Cluster) THEN
+				Cluster = PageInfo(26);
+			END
+			IF ("" <> Cluster) THEN
+				RETURN Cluster + "." + Tag;
+			ELSE
+				RETURN Tag;
+			END
+		END
+	CASE 1
+		// cluster name
+		IF (sep >= 0) THEN
+			RETURN StrLeft(Tag, sep);
+		ELSE IF ("" <> Cluster) THEN
+			RETURN Cluster;
+		ELSE
+			RETURN PageInfo(26);
+		END END
+	CASE 2
+		// tag name
+		IF (sep >= 0) THEN
+			RETURN StrRight(Tag, StrLength(Tag) - sep - 1);
+		ELSE
+			RETURN Tag;
+		END
+	CASE ELSE
+		RETURN Tag;
+	END SELECT
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_PagenameEqual
+//
+//	SUMMARY:
+//		Compares (case-insensitively) whether two page names are equal.
+//
+//	PARAMS:
+//
+//		Page1		- The 1st page name
+//		Page2		- The 2nd page name
+//			
+//	RETURNS: 
+//		One (1) if page names are the same, otherwise Zero (0).
+//
+//	REMARKS:
+//		For page name that starts with "!", PageInfo(0) would replace the "!"
+//		character with " " (space), this function will convert it back to the
+//		"!" character before doing comparison.
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _PagenameEqual(STRING Page1, STRING Page2)
+	// page name starts with "!" may return as " pagename" by PageInfo()
+	IF (Page1 <> "") THEN
+		IF (StrLeft(Page1, 1) = " ") THEN
+			Page1 = "!" + StrRight(Page1, StrLength(Page1) - 1);
+		END
+	END
+	IF (Page2 <> "") THEN
+		IF (StrLeft(Page2, 1) = " ") THEN
+			Page2 = "!" + StrRight(Page1, StrLength(Page2) - 1);
+		END
+	END
+	RETURN (StrLower(Page1) = StrLower(Page2));
+END

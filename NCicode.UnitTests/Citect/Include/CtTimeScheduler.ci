@@ -1,0 +1,1479 @@
+
+//***********************************************************************
+//
+//	Citect Time Scheduler
+//  updated 25/01/2005
+//	
+//***********************************************************************
+
+
+INT hTmSchedTask=-1;
+GLOBAL STRING TmSchedClusterName = "";
+GLOBAL STRING TmSched_act_path;
+STRING sTmSchedPrg;
+
+STRING sTmSchedSubSeqLabel;
+STRING sTmSchedSubSeqs[200];
+STRING sTmSchedTags[200];
+STRING sTmSchedVals[200];
+String Act_PrgName;
+INT TmSchedModeAuto=1;
+INT TmSchedStarted=0;
+STRING tableau[220][2];
+STRING tableauErr[220][2];
+String Last_Action="";
+
+GLOBAL string glob_TmSched_Pri_Path;
+GLOBAL string glob_TmSched_Stby_Path;
+
+INT HErrForm;
+INT hListField;
+INT PrgExecCounter=0; //copied from CitectTimeScheduler.ctz
+
+
+// this function has to be called from the client process on the alarm server machine.
+FUNCTION StartScheduler()
+	IF ProcessIsClient() <> 1 THEN		
+		RETURN;
+	END 
+	// the TmSchedCluster is specified in the project parameter or citect.ini
+	// if not, the first cluster name will be chosen.
+	STRING sClusterName;
+	IF ClusterNext(ClusterFirst()) = "" THEN // only one cluster
+		sClusterName = ParameterGet("TmSched", "Cluster", ClusterFirst()); 
+	ELSE
+		sClusterName =ParameterGet("TmSched", "Cluster", "");
+	END
+	IF TmSched_Check_Cluster(sClusterName) = -1 THEN // check cluster (and show error message)
+		RETURN;
+	END
+	// polling in the background until an active alarm server is found, then the TmSched update process starts
+	TaskNew("TmSched_InitializationPolling", "^"" + sClusterName + "^"",0);
+END
+
+// this function keeps iterating until an active alarm server is found on the machine
+// if the active alarm server is found, the TmSched update process will start.
+FUNCTION TmSched_InitializationPolling(STRING sClusterName)
+	INT		bFoundActiveAlarm = 0; // 1 if found, 0 otherwise
+	WHILE (bFoundActiveAlarm = 0) DO
+		IF ServerInfoEx("Alarm",0,"Alarm",sClusterName) = "1" THEN
+			TmSched_Start_update(sClusterName);
+			TaskNew("TmSched_CheckTask", "", 0);
+			bFoundActiveAlarm = 1;
+		END; // IF ServerInfoEx("Alarm",0,"Alarm",sClusterName) = "1"
+		SleepMS(5000);
+	END; // WHILE (bFoundActiveAlarm = 0)
+END
+
+FUNCTION TmSched_CheckTask()
+// function to check if the cicode "TmSched_Update()" is still alive ....
+
+INT hTsk;
+	Errset(1);
+	hTsk = TaskHnd("TmSched_Update");
+
+	//TmSched_Log("Scheduler cicode task "+inttostr(hTsk));
+	
+	if (hTsk = -1) then
+		TmSched_Log("Scheduler cicode task creating new task ...");
+ 		hTmSchedTask=TaskNew("TmSched_Update","",0,TmSchedClusterName);
+		TmSched_Log("Scheduler cicode task restarted.");
+	END
+End
+
+
+
+
+STRING 
+FUNCTION TmSched_GetTheCitectIniName()
+STRING sCitect_ini;
+//STRING sDrive, sDir, sFile, sExt;
+
+	sCitect_ini = ServerInfo("Client", 3); // citect.ini
+	//FileSplitPath(sCitect_ini, sDrive, sDir, sFile, sExt);
+	//sCitect_ini = sFile + sExt;
+	//Message(sFile,sFile,0);
+	//RETURN (sCitect_ini);
+	
+	RETURN ("^"" + sCitect_ini + "^"") 
+END
+ 
+
+STRING 
+FUNCTION TmSched_GetClusterName()
+	RETURN TmSchedClusterName;
+END
+
+
+FUNCTION TmSched_configurator(INT ReadOnlyMode = 0)
+STRING TmSched_path;
+string project_name;
+string network;
+
+
+	Errset(1);
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	IF strlength(TmSched_path)=0 THEN
+		RETURN;
+	END;
+	ParameterPut("TmSched","ReadOnly",ReadOnlyMode);
+
+	IF strRight(TmSched_path,1)="\" THEN
+		TmSched_path=strleft(TmSched_path, StrLength(TmSched_path)-1);
+	END;
+
+	network=ParameterGet("LAN","TCPIP","");
+	IF network = "1" 
+		THEN project_name="TMSCHED_PRI_STBY";
+		ELSE project_name=ParameterGet("CTEDIT","LASTDATABASE","");
+	END;
+	Exec(TmSched_path+"\ctTimeScheduler.exe "+TmSched_GetTheCitectIniName()+" "+"^""+project_name+"^"");
+
+	TaskResume(hTmSchedTask);
+
+END
+
+
+
+FUNCTION TmSched_search_tag(String stag)
+STRING TmSched_path;
+
+	TmSched_set_act_path();
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	if strlength(TmSched_path)=0 then
+		return;
+	end;
+	if strRight(TmSched_path,1)="\" then
+		TmSched_path=strleft(TmSched_path,strlength(TmSched_path)-1);
+	end;
+	Exec(TmSched_path+"\ctTimeScheduler.exe search "+"^""+TmSched_act_path+"^""+" "+stag);
+
+END
+
+
+//* wrapper function for displaying an error Message in a new task */
+PRIVATE
+FUNCTION TmSched_Display_Error(STRING msg)
+	STRING title = "Error - TimeScheduler Update";
+	TaskNew("Message", "^"" + title + "^", ^"" + msg + "^", 16", 0);
+END 
+
+//* Check if a cluster is configured correctly for running the timeScheduler update in*/
+// <return>1 if the given cluster is configured correctly, false otherwise</return>
+INT
+FUNCTION TmSched_Check_Cluster(STRING sClusterName)
+	INT nClusterStatus;
+	IF sClusterName = "" THEN
+		TmSched_Display_Error("No cluster is selected. A system parameter of which: ^n" + 
+								"Section Name = TmSched ^n" +
+								"Name = Cluster ^n" +
+								"Value = <your_cluster> ^n" +
+								"has to be created. ");
+		RETURN -1;
+	END
+	nClusterStatus = ClusterStatus(sClusterName, 1);
+	SELECT CASE nClusterStatus
+		CASE -2
+			TmSched_Display_Error("The selected cluster '" + sClusterName + "' does not exist. ");
+			RETURN -1;
+		CASE -1
+			TmSched_Display_Error("No alarm server is found in the selected cluster '" + sClusterName + "'. ");
+			RETURN -1;			
+		CASE 0
+			TmSched_Display_Error("The selected cluster '" + sClusterName + "' is inactive. ");
+			RETURN -1;			
+		CASE 1
+			TmSched_Display_Error("The connection to the alarm server in the selected cluster '" + sClusterName + "' is offline. ");
+			RETURN -1;	
+		CASE ELSE // including Case = 2
+			RETURN 0;
+	END SELECT 
+END
+
+
+// Pre-condition: TmSched_Check_Cluster(sClusterName) = 0
+PRIVATE
+FUNCTION TmSched_Start_update(STRING sClusterName)
+	ErrSet(1);
+	TmSched_set_act_path();
+	TmSchedClusterName = sClusterName;
+	ParameterPut("Code","HaltOnError",0);
+	
+	TmSched_InitOverridesVarList();
+	TmSched_InitOverridesSeqList();
+	
+	TmSchedstarted = 1;
+	SleepMS(200);
+	IF hTmSchedTask=-1 then
+		hTmSchedTask=TaskNew("TmSched_Update", "", 0, TmSchedClusterName);
+	END;
+END
+
+
+FUNCTION TmSched_stop_update()
+	IF hTmSchedTask <> -1 then
+		TaskKill(hTmSchedTask);
+		hTmSchedTask=-1;
+		TmSchedStarted =0;
+	end;
+END
+
+
+STRING FUNCTION TmSched_GetPath()
+	RETURN TmSched_act_path;
+END
+
+
+FUNCTION TmSched_check_act_path()
+	TmSched_Get_PRI_STBY_path();
+	// check TmSched_act_path
+	IF StrLength(FileFind(TmSched_act_path + "*.*", 0)) = 0 THEN
+		// look among Pri_Path, Stby_Path and '[RUN]:\TmSched\' for a valid path for TmSched_act_path
+		IF (TmSched_act_path <> glob_TmSched_Pri_Path) AND 
+				(StrLength(FileFind(glob_TmSched_Pri_Path + "*.*", 0)) > 0) THEN
+			TmSched_act_path = glob_TmSched_Pri_Path;
+		ELSE
+			IF (TmSched_act_path <> glob_TmSched_Stby_Path) AND
+					(StrLength(FileFind(glob_TmSched_Stby_Path + "*.*", 0)) > 0) THEN
+				TmSched_act_path = glob_TmSched_Stby_Path;	
+			ELSE
+				TmSched_act_path = PathToStr("[RUN]:\TmSched\");
+			END
+		END
+	END
+END
+
+
+FUNCTION TmSched_set_act_path()
+	STRING tmpPath;
+	STRING sPath;
+
+	TmSched_Get_PRI_STBY_path();
+	
+	sPath = FileFind(glob_TmSched_Pri_Path + "*.*", 0);
+	IF StrLength(sPath) = 0 THEN
+		sPath = FileFind(glob_TmSched_Stby_Path+"*.*", 0);
+		IF StrLength(sPath) = 0 THEN
+			tmpPath = PathToStr("[RUN]:\TmSched\");
+		ELSE
+			tmpPath = glob_TmSched_Stby_Path;
+		END;
+	ELSE
+		tmpPath = glob_TmSched_Pri_Path;
+	END;
+	TmSched_act_path = tmpPath;
+	//message(TmSched_act_path,"test",48);
+END
+
+
+
+FUNCTION TmSched_Get_PRI_STBY_path()
+	STRING tmppath;
+	STRING NetWork,sPath;
+	
+	ErrSet(1);
+	tmppath=pathtostr("[RUN]:\TmSched\");
+	IF strRight(tmpPath,1) <> "\" THEN
+		TMPPath = tmpPath+"\";
+	END;
+	glob_TmSched_Pri_Path = TMPPath;
+	glob_TmSched_Stby_Path = TMPPath;
+	
+	network=ParameterGet("LAN","TCPIP","");
+	IF network = "1" THEN
+		glob_TmSched_Pri_Path=ParameterGet("TmSched","Pri","");
+		IF strRight(glob_TmSched_Pri_Path,1)<>"\" THEN
+			glob_TmSched_Pri_Path = glob_TmSched_Pri_Path+"\";
+		END;
+		glob_TmSched_Stby_Path=ParameterGet("TmSched","Stby","");
+		IF strRight(glob_TmSched_Stby_Path,1)<>"\" THEN
+			glob_TmSched_Stby_Path = glob_TmSched_Stby_Path+"\";
+		END;
+	END;
+END
+
+
+
+
+
+FUNCTION TmSched_Update()
+	STRING task_filename;
+	STRING Prg_filename;
+	STRING ErrFileName;
+	INT act_hour;
+	INT act_min;
+	INT ErrPrg,i;
+	INT act_year;
+	INT act_month;
+	INT act_day;
+	INT act_dayofweek;
+	INT Done=0;
+	INT mt,MultiTask;
+	INT SubPrgIsExpr;
+	INT serial_ok; //copied from CitectTimeScheduler.ctz
+	INT Loop=1; 
+	Errset(1);
+	
+	//message("ok","ok",48);
+	TmSched_Start_Net_Update();
+	Serial_ok = TmSchedGetLicense();
+	WHILE Loop=1 DO
+		IF (TmSched_GetStatus()=1)THEN  // is this the primary server ....
+			TmSched_InitOverridesVarList();
+			TmSched_InitOverridesSeqList();	
+			IF (TimeSec(TimeCurrent())< 3) THEN
+				act_year		=DateYear(TimeCurrent(),1);
+				act_month      	=DateMonth(TimeCurrent());
+				act_day        	=DateDay(TimeCurrent());
+				act_dayofweek  	=DateWeekDay(TimeCurrent());
+				act_hour       	=TimeHour(TimeCurrent());
+				act_min        	=TimeMin(TimeCurrent());
+				//	Message(act_hour, act_min, 0);
+			    IF done = 0 then
+			    	TmSched_check_act_path(); // check if the active path is still accessible. If not, the active path has to be re-defined.
+			    	task_filename = TmSched_get_task_filename(act_year,act_month,act_day,act_dayofweek);   
+					IF task_filename <> "" then
+						done = 1;
+						prg_filename  = TmSched_Get_programme(task_filename,act_hour,act_min);
+						MultiTask = TmSched_CheckMultiTaskORExpression(prg_filename);
+						ErrFileName = TmSched_act_path+"PRG_"+IntToStr(act_year)+"_"+IntToStr(act_month)+"_"+IntToStr(act_day)+".err";
+						//copied from CitectTimeScheduler.ctz
+					 
+						IF (NOT serial_OK) THEN
+		    	        	IF (PrgExecCounter > 5) THEN
+								Message("Time scheduler","No license available",0);
+								RETURN;
+		            		END
+		            		PrgExecCounter = PrgExecCounter + 1;
+		            	END;
+					
+						SELECT CASE MultiTask
+						CASE 0	
+							//simple set tag value
+							ErrPrg = TmSched_Execute_Programme(prg_filename,0,10);
+							IF ErrPrg = -1 THEN
+								sleep(3);
+								ErrPrg = TmSched_Execute_Programme(prg_filename,0,10);
+							end
+							IF ErrPrg = -1 THEN
+								TmSched_Add_ErrorList_Prg(prg_filename,ErrFileName );
+							END
+							IF prg_filename <> "" then
+		        			        Last_Action=Time()+":   "+task_filename+":"+Act_PrgName;
+							END;/*prg_filename*/
+						CASE -1
+							// Expression
+							ErrPrg = TmSched_Execute_Programme_Expr(prg_filename,0,10);
+							IF ErrPrg = -1 THEN
+								sleep(3);
+								ErrPrg = TmSched_Execute_Programme_Expr(prg_filename,0,10);
+							end
+							IF ErrPrg < 0 THEN
+								TmSched_Add_ErrorList_Prg(prg_filename,ErrFileName );
+							END
+							IF prg_filename <> "" THEN
+		        			        Last_Action=Time()+":   "+task_filename+":"+Act_PrgName;
+							END;/*prg_filename*/
+						CASE IS > 0
+							//multi task sequence 
+							
+							//check FOR disabled list ...
+							IF (TmSched_CheckOverridesSeqList(sTmSchedSubSeqLabel)=0) THEN
+							   	FOR mt = 1 TO MultiTask DO
+						   	   	 	//Message("multi", sTmSchedSubSeqs[mt],0);
+		
+						   	   	 	SubPrgIsExpr = TmSched_IsSubProg_Expression(sTmSchedSubSeqs[mt]);
+						   	   	 	IF SubPrgIsExpr THEN
+		 								ErrPrg = TmSched_Execute_Programme_Expr(sTmSchedSubSeqs[mt],0,10);
+										IF ErrPrg = -1 THEN
+											Sleep(3);
+											ErrPrg = TmSched_Execute_Programme_Expr(sTmSchedSubSeqs[mt],0,10);
+										END
+		
+									ELSE
+		 								ErrPrg  = TmSched_Execute_Programme(sTmSchedSubSeqs[mt],0,10);
+										IF ErrPrg = -1 THEN
+											Sleep(3);							
+											ErrPrg  = TmSched_Execute_Programme(sTmSchedSubSeqs[mt],0,10);
+										END
+									END
+									
+									IF ErrPrg = -1 THEN
+										TmSched_Add_ErrorList_Prg(prg_filename,ErrFileName);
+									END
+									IF sTmSchedSubSeqs[mt] <> "" THEN
+		       		 					Last_Action = Time()+":   "+sTmSchedSubSeqs[mt]+":"+Act_PrgName;
+									END;
+					   			END
+					   		ELSE
+					   				TmSched_Log("Prog "+sTmSchedSubSeqLabel+" IS disabled.");
+					   		END
+						END SELECT
+					END;/*task_filename*/
+			  	END;
+			ELSE  /* (done=0)AND(TimeSec(TimeCurrent())< 3*)*/
+				if (TimeSec(TimeCurrent())> 30) then
+					done=0;
+				END;
+			END;
+			Sleep(1);
+ 		ELSE
+ 			TmSched_Log("This is not a primary alarm server");
+ 			Loop=0; // exits while loop.
+
+	 	END; // IF (TmSched_GetStatus()=1) ...  
+	END /*while*/
+END
+
+
+
+
+
+
+INT FUNCTION TmSched_Execute_Programme_Expr(STRING prg_filename,INT force,INT sleeptime)
+INT i,max_functions=0;
+INT Error;
+INT hFile;
+STRING Buffer="";
+INT Counter=0;
+STRING s_Tag,s_Type,s_TagA,s_Op,s_TagB;
+REAL rVal_TagA, rVal_TagB,rVal_TagC;
+INT Seq_passed_Error;
+STRING sErr;
+
+	
+	ErrSet(1);
+	IF prg_filename = "" THEN
+		RETURN(0);
+	END;
+	IF NOT FileExist(TmSched_act_path+prg_filename) THEN
+		RETURN(0);
+	END;
+
+	ErrSet(1);
+	IF FORce THEN TaskSuspend(hTmSchedTask);END;
+
+
+	Seq_passed_Error = 0;
+	counter=0;
+	hFile = FileOpen(TmSched_act_path+prg_filename,"r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				counter=counter+1;	
+				IF counter > 1 THEN
+					s_Tag  = StrWord(Buffer);
+					s_Type = StrWord(Buffer);
+					s_TagA = StrWord(Buffer);
+					s_Op   = StrWord(Buffer);
+					s_TagB = StrWord(Buffer);
+					
+					IF s_Tag <> "" THEN
+			 		  	IF (Force) OR (TmSched_CheckOverridesVarList(s_Tag)=0 ) THEN
+	
+							//Message(s_Tag, s_Type+"|"+s_TagA+"|"+s_OP+"|"+s_TagB,0);
+							/*
+							 SEQ_SELTYPE1           := 'Valeur/Valeur';
+							 SEQ_SELTYPE2           := 'Tag/Tag';
+							 SEQ_SELTYPE3           := 'Tag/Valeur';
+							*/
+							
+							SELECT CASE s_Type
+							CASE "2"
+									rVal_TagA = TagRead(s_TagA, "", TmSchedClusterName);
+									rVal_TagB = TagRead(s_TagB, "", TmSchedClusterName);
+							CASE "3"
+									rVal_TagA = TagRead(s_TagA, "", TmSchedClusterName);
+									rVal_TagB = StrToReal(s_TagB);
+							CASE ELSE
+									rVal_TagA = StrToReal(s_TagA);
+									rVal_TagB = StrToReal(s_TagB);
+							END SELECT
+
+							
+							rVal_TagC = rVal_TagA;
+							SELECT CASE s_Op
+							CASE "+"
+									rVal_TagC = rVal_TagA + rVal_TagB;
+							CASE "-"
+									rVal_TagC = rVal_TagA - rVal_TagB;
+							CASE "*"
+									rVal_TagC = rVal_TagA * rVal_TagB;
+							CASE "/"
+									rVal_TagC = rVal_TagA / rVal_TagB;
+							END SELECT
+
+							
+
+							sErr = TagRead(s_Tag, "", TmSchedClusterName);
+							if (sErr = "") then
+								Error = 1;
+							else
+								Error = TagWrite(s_Tag, rVal_TagC, "", "", TmSchedClusterName);
+								
+							end
+
+							IF Error = 0 THEN 
+								TmSched_Print_Changed_value(Act_PrgName, s_Tag, s_Type+"|"+s_TagA+"|"+s_OP+"|"+s_TagB);
+							ELSE
+								TmSched_Print_Error_value(Act_PrgName, s_Tag, s_Type+"|"+s_TagA+"|"+s_OP+"|"+s_TagB);
+								Seq_passed_Error = 1;
+							END
+						ELSE
+							TmSched_Log("Tag: "+s_Tag+" IS disabled.");
+						END
+					END
+			
+				ELSE
+				Prompt(Buffer);
+				Act_PrgName = Buffer;
+					IF (TmSched_CheckOverridesSeqList(Buffer)=1)AND(force=0) THEN
+						// mode Overrides
+						TmSched_Log("Prog "+Buffer+" is disabled.");
+						counter=0;
+						FileClose(hFile);
+						IF force THEN 
+						  TaskResume(hTmSchedTask);
+						END;
+						RETURN(counter);
+					END
+				END// if counter > 1
+			END; // if buffer
+		END;//while ...
+	END; // if hFile
+	FileClose(hFile);
+
+	IF force THEN 
+	   TaskResume(hTmSchedTask);
+	END
+	IF Seq_passed_Error THEN
+		RETURN(-1)
+	ELSE
+		RETURN(counter)
+	END
+
+END
+
+
+
+
+
+
+INT FUNCTION TmSched_Execute_Programme(String prg_filename,int force,int sleeptime)
+Int i,max_functions=0;
+INT Error;
+INT Seq_passed_Error;
+STRING sErr;
+string sPrg;
+string sTag;
+STRING sVal;
+		ErrSet(1);
+		IF Force THEN TaskSuspend(hTmSchedTask);END;
+
+
+		//Message("execute prog: "+Time(), "filename="+prg_filename,48);
+		Act_PrgName="";
+    	Seq_passed_Error = 0;
+		
+		max_functions = TmSched_init_functions(prg_filename,force); 
+		sPrg = Act_PrgName;
+		if max_functions > 0 then
+			
+			FOR i= 1 to max_functions do
+			sleepms(10);
+			sTag = strtrim(sTmSchedTags[i]);
+			sVal = sTmSchedVals[i];
+			IF (Force) OR (TmSched_CheckOverridesVarList(sTag)=0 ) THEN
+				IF strlength(sTag) > 1 then
+
+					ErrSet(1);
+					sErr = TagRead(sTag, "", TmSchedClusterName);
+
+					Error = TagWrite(sTag,sVal, "", "", TmSchedClusterName);
+
+					IF Error = 0 THEN 
+						TmSched_Print_Changed_value(sPrg, sTag, sVal);
+					ELSE
+						TmSched_Print_Error_value(sPrg, sTag, sVal);
+						Seq_passed_Error = 1;
+					END
+				
+					SleepMS(sleeptime);
+				END
+			 ELSE
+					TmSched_Log("Tag: "+sTag+" is disabled.");
+			 END //
+			END;// for i ...
+		END;
+
+	IF force THEN 
+	  TaskResume(hTmSchedTask);
+	END
+
+	IF Seq_passed_Error THEN
+		RETURN(-1);
+	ELSE
+		RETURN(1);
+	END
+		
+END
+
+
+
+
+
+
+
+INT FUNCTION TmSched_Init_functions(string prg_filename,int force)
+INT hFile;
+String Buffer="";
+String tagBuffer="";
+String valBuffer="";
+INT Counter=0;
+STRING sNext;
+
+	ErrSet(1);
+
+	//message("ok",prg_filename,48);
+	if prg_filename = "" then
+		return(0);
+	end;
+	if not fileexist(TmSched_act_path+prg_filename) then
+		return(0);
+	end;
+	counter=0;
+	hFile = Fileopen(TmSched_act_path+prg_filename,"r");
+	if hFile <> -1 then
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			buffer=StrTrim(Buffer);
+			if strlength(buffer) > 1 THEN
+				counter=counter+1;	
+				if counter > 1 then
+					Tagbuffer=strword(Buffer);
+					valbuffer=strword(Buffer);
+					sNext    =StrWord(Buffer);
+					IF sNext <> "" THEN
+						valbuffer = valbuffer + " " + sNext;
+					END
+					sNext    =StrWord(Buffer);
+					IF sNext <> "" THEN
+						valbuffer = valbuffer + " " + sNext;
+					END
+					sTmSchedTags[counter]=tagbuffer;
+					sTmSchedVals[counter]=valbuffer;
+					else
+					//prompt(Buffer);
+					Act_PrgName = Buffer;
+					if (TmSched_CheckOverridesSeqList(Buffer)=1)AND(force=0) then
+						// mode Overrides
+						TmSched_Log("Prog "+Buffer+" is disabled.");
+						counter=0;
+						FileClose(hFile);
+						return(0);
+					end;
+				end;
+			end;
+		end;
+	end;
+	FileClose(hFile);
+	return(counter);
+END
+
+
+
+STRING FUNCTION TmSched_GetLibFromPrg(STRING prg_filename)
+INT hFile;
+STRING Buffer="";
+
+	ErrSet(1);
+	
+	IF prg_filename = "" THEN
+		RETURN("");
+	END;
+	IF NOT FileExist(TmSched_act_path+prg_filename) THEN
+		RETURN("");
+	END;
+	hFile = FileOpen(TmSched_act_path+prg_filename,"r");
+	IF hFile <> -1 THEN
+			Buffer=FileReadLn(hFile);
+	END
+	FileClose(hFile);
+	RETURN(Buffer);
+	
+END
+
+
+INT FUNCTION TmSched_CheckMultiTaskORExpression(STRING prg_filename)
+INT l,hFile;
+STRING Buffer="", sLib;
+INT counter = 0;
+
+	sTmSchedSubSeqLabel = "";
+	Errset(1);
+	IF prg_filename = "" THEN
+		RETURN(0);
+	END;
+	IF NOT FileExist(TmSched_act_path+prg_filename) THEN
+		RETURN(0);
+	END;
+	
+
+	hFile = FileOpen(TmSched_act_path+prg_filename,"r");
+	IF hFile <> -1 THEN
+		Buffer=FileReadLn(hFile);
+		IF StrLength(buffer) > 1 THEN
+		   IF StrLeft(buffer,2) = "%%" THEN
+           		// Variables/Expression
+				FileClose(hFile);
+           		RETURN(-1);
+           END
+		   IF StrLeft(buffer,2) = "$$" THEN
+           		// Seq calls Seq
+           		l = StrLength(buffer)-2;
+           		sTmSchedSubSeqLabel=StrRight(buffer,l);
+           		//Message("multi", sTmSchedSubSeqLabel,0);
+				WHILE NOT FileEOF(hFile) DO
+					Buffer=FileReadLn(hFile);
+					IF buffer <> "" THEN
+						counter = counter + 1;				
+						sLib                 = StrWord(buffer);
+						sTmSchedSubSeqs[counter] = strWord(buffer);
+						//Message(buffer, buffer,0);
+					END
+				END
+				FileClose(hFile);
+           		RETURN(counter);
+           END
+		END
+	END;
+	FileClose(hFile);
+	RETURN(0);
+END
+
+
+INT FUNCTION TmSched_IsSubProg_Expression(STRING prg_filename)
+INT l,hFile;
+STRING Buffer="", sLib;
+INT counter = 0;
+
+	ErrSet(1);
+	IF prg_filename = "" THEN
+		RETURN(0);
+	END;
+	IF NOT FileExist(TmSched_act_path+prg_filename) THEN
+		RETURN(0);
+	END;
+	
+
+	hFile = FileOpen(TmSched_act_path+prg_filename,"r");
+	IF hFile <> -1 THEN
+		Buffer=FileReadLn(hFile);
+    	FileClose(hFile);
+   	END;
+
+		
+	IF StrLength(buffer) > 1 THEN
+		   IF StrLeft(buffer,2) = "%%" THEN
+           		// Expression
+           		RETURN(1);
+           END
+	END;
+	RETURN(0);
+END
+
+
+
+
+
+
+String FUNCTION TmSched_Get_programme(string task_filename,int act_hour,int act_min);
+INT maxfnk;
+INT hFile;
+String Buffer="";
+String tskprgBuffer="";
+String tsktimeBuffer="";
+String Buffer_type="";
+INT Counter=0;
+string sacthour;
+string sactmin;
+String act_time_str;
+
+
+
+	Errset(1);
+	if not fileexist(TmSched_act_path+task_filename) THEN
+		RETURN("");
+	END;
+	sacthour=inttostr(act_hour);
+	if strlength(sacthour)=1 then
+		sacthour="0"+sacthour;
+	end;
+	sactmin=inttostr(act_min);
+	if strlength(sactmin)=1 then
+		sactmin="0"+sactmin;
+	end;
+	act_time_str=sacthour+":"+sactmin;
+
+
+	hFile = Fileopen(TmSched_act_path+task_filename,"r");
+	if hFile <> -1 then
+	!prompt(task_filename+act_time_str);
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			if buffer <> "" then
+				tsktimebuffer=strword(Buffer);
+				tskprgbuffer=strword(Buffer);
+				if act_time_str=tsktimebuffer then
+					//message(tsktimebuffer,tskprgbuffer,48);
+					FileClose(hFile);
+					return(tskprgbuffer);
+				end;
+			end;
+		end;
+	end;
+	FileClose(hFile);
+	RETURN("");
+END
+
+
+
+
+
+
+String FUNCTION TmSched_Get_task_filename(INT act_year,INT act_month,INT act_day,INT act_dayofweek);
+string Month_Def_filename="";
+string Task_filename="";
+INT daytype;
+INT hFile;
+String Buffer="";
+String Buffer_type="";
+INT Counter=0;
+
+	Errset(1);
+
+	TmSched_Init_taglist();
+	Month_def_filename = TmSched_act_path+inttostr(act_year)+"_"+inttostr(act_month)+".def";
+	if fileexist(Month_def_filename) then
+		hFile = Fileopen(Month_def_filename,"r");
+		if hFile <> -1 then
+			WHILE NOT FileEOF(hFile) DO
+				counter=counter+1;
+				Buffer=FileReadLn(hFile);
+				if counter=act_day then
+						Buffer_type=Buffer;
+				END;
+			end;	/*while */
+		FileClose(hFile);
+		else  /*hFile <> -1*/
+		Buffer_type="1";
+		end; /*hFile <> -1*/
+	end;/*fileexists*/
+	if buffer_type = "" then 
+		Buffer_type="1";
+	end;
+	daytype=strtoint(Buffer_type);
+	if daytype=1 then /* Normal */
+		task_filename=inttostr(act_dayofweek)+"Normal.tsk";
+		else
+		task_filename=inttostr(daytype)+"Special.tsk";
+	end;
+	return(task_filename);
+
+END
+
+
+FUNCTION TmSched_Init_taglist()
+INT i;
+
+	for i=1 to 99 do
+		sTmSchedTags[i]="";
+	end;
+END
+
+
+FUNCTION TmSched_Set_AutoMode(Int Mode)
+
+	TmSchedModeAuto=Mode;
+END
+
+
+INT FUNCTION TmSched_Get_AutoMode()
+
+	Return(TmSchedModeAuto);
+END
+
+
+INT FUNCTION TmSched_GetStatus()
+INT SrvInfo;
+
+	IF TmSchedStarted = 0 then
+		Return(0);
+	end;
+	SrvInfo=ServerInfoEx("ALARM",0,"ALARM",TmSchedClusterName);
+	if (TmSchedModeAuto=1)AND(SrvInfo=1) then
+		Return(1)
+		ELSE
+		Return(0);
+	end;
+END
+
+
+
+
+
+FUNCTION TmSched_CONFIG_PRG_LIST(INT ReadOnlyMode = 0 )
+string project_name;
+STRING TmSched_path,network;
+
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	if strlength(TmSched_path)=0 then
+		return;
+	end;
+	if strRight(TmSched_path,1)="\" then
+		TmSched_path=strleft(TmSched_path,strlength(TmSched_path)-1);
+	end;
+
+	ParameterPut("TmSched","ReadOnly",ReadOnlyMode);
+	network=ParameterGet("LAN","TCPIP","");
+	if network = "1"
+		then project_name="TmSched_PRI_STBY";
+		else project_name=ParameterGet("CTEDIT","LASTDATABASE","");
+	end;
+	Exec(TmSched_path+"\ctTimeScheduler.exe "+TmSched_GetTheCitectIniName()+" "+"^""+project_name+"^""+" PrgSelect");
+END
+
+
+
+
+FUNCTION TmSched_Start_Net_Update()
+int pri,hmsg;
+string network;
+
+	network=ParameterGet("LAN","TCPIP","");
+	IF network <> "1" THEN
+		return;
+	end;
+	pri=ServerInfoEx("ALARM", 2, "ALARM", TmSchedClusterName); // 0 -> primary; 1 -> standby
+	IF (pri=0)AND(ServerInfoEx("ALARM",0,"ALARM",TmSchedClusterName)="1")THEN
+		TmSched_NET_UPDATE();
+		else
+		hmsg=Msgopen("alarm",3,0);
+		if hmsg<>-1 then
+			msgrpc(hmsg,"TmSched_NET_UPDATE","",1);
+		end;
+	end;
+END	
+
+
+
+FUNCTION TmSched_NET_UPDATE()
+STRING TmSched_path;
+
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	if strlength(TmSched_path)=0 then
+		return;
+	end;
+	if strRight(TmSched_path,1)="\" then
+		TmSched_path=strleft(TmSched_path,strlength(TmSched_path)-1);
+	end;
+    
+    
+    //.....xxxxx
+    Exec(TmSched_path+"\NetUpdte.Exe "+TmSched_GetTheCitectIniName());
+    
+    
+END
+
+
+
+
+
+FUNCTION TmSched_PRGDEBUG()
+STRING TmSched_path;
+
+	TmSched_set_act_path();
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	if strlength(TmSched_path)=0 then
+		return;
+	end;
+	if strRight(TmSched_path,1)="\" then
+		TmSched_path=strleft(TmSched_path,strlength(TmSched_path)-1);
+	end;
+    Exec(TmSched_path+"\PrgDebug.exe "+"^""+TmSched_act_path+"TmSchedPrg.lst"+"^"");
+END
+
+
+
+FUNCTION TmSched_TAGDEBUG()
+STRING TmSched_path,act_rep,iodevMask;
+
+	TmSched_path=ParameterGet("TmSched","Path","c:\TmSched");
+	if strlength(TmSched_path)=0 then
+		return;
+	end;
+	if strRight(TmSched_path,1)="\" then
+		TmSched_path=strleft(TmSched_path,strlength(TmSched_path)-1);
+	end;
+
+	act_rep=pathtostr("[RUN]:");
+	if strRight(act_rep,1)="\" then
+		act_rep=strleft(act_rep,strlength(act_rep)-1);
+	end;
+
+	iodevMask=ParameterGet("TmSched","FilterIODevice","");
+	if iodevMask="" then
+	        Exec(TmSched_path+"\TagDebug.exe "+"^""+act_rep+"^"");
+		else	
+	        Exec(TmSched_path+"\TagDebug.exe "+"^""+act_rep+"^""+" "+iodevMask);
+	end;
+
+END
+
+
+
+
+FUNCTION TmSched_SELECT_PRG_LIST(STRING sParamPrgName = "")
+int i,result,hFile,l;
+String sBuf,Buffer1,buffer2,filename,Buffer;
+int counter=0;
+INT MultiTask,mt;
+STRING prg_filename;
+INT ErrPrg;
+INT Seq_Error = 0;
+INT Serial_ok;
+INT SubPrgIsExpr;
+
+
+	Errset(1);
+	TmSched_set_act_path();
+	Seq_Error = 0;
+	Serial_ok = TmSchedGetLicense();
+	IF NOT serial_OK THEN
+	   Message("Time scheduler","No license available",0);
+    END
+	FOR counter=0 to 199 do
+		tableau[counter][0]="";
+		tableau[counter][1]="";
+	end;
+	counter=0;
+	IF sParamPrgName = "" THEN
+		FormNew("@(Program list)",44,11,1+16);
+		FormListBox(2 ,1, 40, 9, sBuf, 1);
+	END
+	
+	filename=TmSched_act_path+"TmSchedPrg.lst";
+	IF not fileexist(filename) then
+			RETURN(0);
+	END;
+	hFile = Fileopen(filename,"r");
+	IF hFile <> -1 then
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			if buffer <> "" then
+				buffer1=strword(buffer);
+				buffer2=strword(buffer);
+				tableau[counter][0]=buffer1;
+				tableau[counter][1]=buffer2;
+		   		IF (StrLeft(buffer2,2) = "$$") OR (StrLeft(buffer2,2) = "%%") THEN
+		   		    l = StrLength(buffer2);
+					buffer2 = StrRight(buffer2, l-2);
+		   		END
+				IF sParamPrgName = "" THEN
+				    IF (Serial_ok) OR (counter < 5) THEN
+ 					    FormAddList(Buffer2);
+ 					END
+				END
+			end;
+			counter=counter+1;
+		end;
+	FileClose(hFile);
+	end;/*hFile*/
+	
+	Result = 0;
+	IF sParamPrgName = "" THEN
+		FormButton(10, 10 ,"  " + "@(OK)" + "  ", 0, 1);
+		FormButton(25 ,10 ,"@(Cancel)", 0, 2);
+	
+		result=FormRead(0);	
+		IF sBuf="" then 
+				RETURN;
+		END;
+	ELSE
+		sBuf = sParamPrgName;
+	END
+		
+	IF Result=0 THEN
+			FOR counter=0 to 199 do
+			IF (sBuf = tableau[counter][1]) OR
+			   ("%%"+sBuf = tableau[counter][1]) OR
+			   ("$$"+sBuf = tableau[counter][1]) THEN
+			prg_filename = tableau[counter][0];
+			
+			MultiTask = TmSched_CheckMultiTaskORExpression(prg_filename);
+			
+			SELECT CASE MultiTask
+			CASE 0			
+					//simple set tag value
+					ErrPrg = TmSched_Execute_Programme(prg_filename,1,10);
+					IF ErrPrg = -1 THEN
+						Seq_Error = 1;
+					END
+					IF prg_filename <> "" THEN
+        			        Last_Action=Time()+":   "+prg_filename+":"+Act_PrgName;
+					END;/*prg_filename*/
+			CASE -1
+					// Expression
+					ErrPrg = TmSched_Execute_Programme_Expr(prg_filename,1,10);
+					IF ErrPrg = -1 THEN
+						Seq_Error = 1;
+					END
+					IF prg_filename <> "" THEN
+        			        Last_Action=Time()+":   "+prg_filename+":"+Act_PrgName;
+					END;/*prg_filename*/
+			CASE IS > 0
+					//multi task sequence
+				   	FOR mt = 1 TO MultiTask DO
+			   	   	 	//Message("multi", sTmSchedSubSeqs[mt],0);
+				   	   	 SubPrgIsExpr = TmSched_IsSubProg_Expression(sTmSchedSubSeqs[mt]);
+ 
+ 		   	   	 	   		//Message("expr",sTmSchedSubSeqs[mt],0);
+				   	   	 	IF SubPrgIsExpr THEN
+  								ErrPrg = TmSched_Execute_Programme_Expr(sTmSchedSubSeqs[mt],1,10);
+							ELSE
+ 								ErrPrg = TmSched_Execute_Programme(sTmSchedSubSeqs[mt],1,10);
+ 							END
+						IF ErrPrg = -1 THEN
+							Seq_Error = 1;
+
+						END						
+						IF sTmSchedSubSeqs[mt] <> "" THEN
+        					Last_Action = Time()+":   "+sTmSchedSubSeqs[mt]+":"+Act_PrgName;
+						END;
+			   		END
+			END SELECT
+			!message("TmSched","Programme "+tableau[counter][1]+" exécut?",48);
+			Last_Action=Time()+":   "+prg_filename;
+			end;
+		END;//for...
+		
+  	/*
+  	 IF Seq_Error THEN
+  	 	Message(buffer2,"Erreur pendant l'envoi de la séquence !",48);
+	 else
+  	 	Message(buffer2,"Séquence terminée !",48);
+	 END
+	 */
+		
+	END;//if result=0 then
+END
+
+
+FUNCTION TmSched_Add_ErrorList_Prg(STRING prg_filename, STRING ErrFileName)
+
+INT h_File;
+STRING sBuf;
+
+	ErrSet(1);
+	h_File=FileOpen(ErrFileName,"a+");
+	sBuf = prg_filename + " " + TmSched_GetLibFromPrg(prg_filename);
+	FileWriteLn(h_File, sBuf);
+	FileClose(h_File);
+END
+
+
+FUNCTION TmSched_SELECT_ERROR_LIST()
+int i,result,hFile,l;
+String sBuf,Buffer1,buffer2,filename,Buffer;
+int counter=0;
+INT MultiTask,mt;
+STRING prg_filename;
+INT act_year;
+INT act_month;
+INT act_day;
+STRING ErrFileName;
+INT Seq_Error = 0;
+INT ErrPrg;
+
+	Errset(1);
+
+	TmSched_set_act_path();
+	for counter=0 to 199 do
+		tableauErr[counter][0]="";
+		tableauErr[counter][1]="";
+	end;
+	counter=0;
+	Seq_Error = 0;
+	HErrForm = FormNew("@(Prog error list)",44,11,1+16);
+	FormListBox(2 ,1, 40, 9, sBuf, 1);
+	act_year		=DateYear(TimeCurrent(),1);
+	act_month      	=DateMonth(TimeCurrent());
+	act_day        	=DateDay(TimeCurrent());
+	
+	ErrFileName = TmSched_act_path+"PRG_"+IntToStr(act_year)+"_"+IntToStr(act_month)+"_"+IntToStr(act_day)+".err";
+
+	
+	IF NOT FileExist(Errfilename) THEN
+		return(0);
+	end;
+	hFile = Fileopen(Errfilename,"r");
+	if hFile <> -1 then
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			if buffer <> "" then
+				buffer1=strword(buffer);
+				buffer2=strword(buffer);
+				tableauErr[counter][0]=buffer1;
+				tableauErr[counter][1]=buffer2;
+		   		IF (StrLeft(buffer2,2) = "$$") OR (StrLeft(buffer2,2) = "%%") THEN
+		   		    l = StrLength(buffer2);
+					buffer2 = StrRight(buffer2, l-2);
+		   		END
+				FormAddList(Buffer2);
+			end;
+			counter=counter+1;
+		end;
+	FileClose(hFile);
+	end;/*hFile*/
+	FormButton(4,    10 ,"  " + "@(OK)" + "  ", 0, 1);
+	FormButton(4+12 ,10 ,"@(Cancel)", 0, 2);
+	FormButton(4+24 ,10 ,"@Clear)", clear_Errorlist, 0);
+	result=FormRead(0);	
+	if result=0 then
+		if sBuf="" then 
+			return;
+		end;
+		for counter=0 to 199 do
+			IF (sBuf = tableauErr[counter][1]) OR
+			   ("%%"+sBuf = tableauErr[counter][1]) OR
+			   ("$$"+sBuf = tableauErr[counter][1]) THEN
+			prg_filename = tableauErr[counter][0];
+			
+			MultiTask = TmSched_CheckMultiTaskORExpression(prg_filename);
+			
+			SELECT CASE MultiTask
+			CASE 0			
+					//simple set tag value
+					ErrPrg = TmSched_Execute_Programme(prg_filename,1,10);
+					IF ErrPrg = -1 THEN
+						Seq_Error = 1;
+					END
+					IF prg_filename <> "" THEN
+        			        Last_Action=Time()+":   "+prg_filename+":"+Act_PrgName;
+					END;/*prg_filename*/
+			CASE -1
+					// Expression
+					ErrPrg = TmSched_Execute_Programme_Expr(prg_filename,1,10);
+					IF ErrPrg = -1 THEN
+						Seq_Error = 1;
+					END
+					IF prg_filename <> "" THEN
+        			        Last_Action=Time()+":   "+prg_filename+":"+Act_PrgName;
+					END;/*prg_filename*/
+			CASE IS > 0
+					//multi task sequence
+				   	FOR mt = 1 TO MultiTask DO
+			   	   	 	//Message("multi", sTmSchedSubSeqs[mt],0);
+						ErrPrg = TmSched_Execute_Programme(sTmSchedSubSeqs[mt],1,10);
+						IF ErrPrg = -1 THEN
+							Seq_Error = 1;
+						END
+						IF sTmSchedSubSeqs[mt] <> "" THEN
+        					Last_Action = Time()+":   "+sTmSchedSubSeqs[mt]+":"+Act_PrgName;
+						END;
+			   		END
+			END SELECT
+			!message("TmSched","Programme "+tableau[counter][1]+" exécut?",48);
+			Last_Action=Time()+":   "+prg_filename;
+			end;
+		END;//for
+  	 IF Seq_Error THEN
+  	 	;//Message(prg_filename,"Erreur pendant l'envoi de la séquence !",48);
+  	 ELSE
+  	    	DeleteErrorPrgFromList(ErrFileName, prg_filename);
+  	 		//Message(prg_filename,"Séquence terminée !",48);
+
+	 END
+	END;//if result=0
+END
+
+
+
+FUNCTION DeleteErrorPrgFromList(STRING ErrFileName, STRING prg_filename)
+
+INT hFile1, hFile2;
+STRING sBuf,sPrg, sLib,sTmp;
+
+	ErrSet(1);
+	
+	FileCopy(ErrFileName, "~tmp.err",0);
+	hFile1 = FileOpen("~tmp.err","r");
+	hFile2 = FileOpen(ErrFileName,"w+");
+	WHILE NOT FileEOF(hFile1) DO
+		sBuf = FileReadLn(hFile1);
+		sTmp = sBuf;
+		sPrg = StrWord(sBuf);
+		sLib = StrWord(sBuf);
+		IF StrUpper(sPrg) <> StrUpper(prg_filename) THEN
+			  FileWriteLn(hFile2, sTmp);
+		 END
+	END
+	FileClose(hFile1);
+	FileClose(hFile2);
+	
+END
+
+
+INT FUNCTION YES_NO(STRING MyMessage,STRING Title)
+	FormNew(Title,35,2,0);
+	FormPrompt(2,0,"               "+MyMessage);
+	FormButton(9,1 ,"  " + "@(OK)" + "  ",0,1);
+	FormButton(20,1,"@(Cancel)",0,2);
+	IF FormRead(0)=0 
+      THEN 
+      RETURN(1)
+	ELSE
+	RETURN(0)
+	END
+END
+
+
+
+INT FUNCTION clear_Errorlist()
+INT act_year;
+INT act_month;
+INT act_day;
+STRING ErrFileName;
+INT i;
+
+	ErrSet(1);
+	
+	IF NOT YES_NO("Effacer tous les éléments ?", "Séquences en erreur")THEN
+		RETURN(0);
+	END;
+		
+	
+	
+
+	act_year		=DateYear(TimeCurrent(),1);
+	act_month      	=DateMonth(TimeCurrent());
+	act_day        	=DateDay(TimeCurrent());
+	ErrFileName = TmSched_act_path+"PRG_"+IntToStr(act_year)+"_"+IntToStr(act_month)+"_"+IntToStr(act_day)+".err";
+	
+	IF FileExist(ErrFileName) THEN
+		FileDelete(ErrFileName);
+		FOR i = 0 TO 199 DO
+			 tableauErr[i][0]="";
+			 tableauErr[i][1]="";
+		END
+	END	
+
+	FormDestroy(HErrForm);
+	
+	RETURN(1);
+END
+
+
+
+
+STRING FUNCTION TmSched_LAST_ACTION()
+	
+	return(Last_Action);
+END
+
+
+
+FUNCTION TmSched_Print_Changed_value(String prg_filename, STRING sTmSchedTag, STRING sTmSchedVal)
+string msg;
+
+	Errset(1);
+	Last_Action = prg_filename+":"+sTmSchedTag+ " " + sTmSchedVal;
+	TmSched_Log(Last_Action);
+END
+
+
+
+FUNCTION TmSched_Print_Error_value(STRING prg_filename, STRING sTmSchedTag, STRING sTmSchedVal)
+STRING msg;
+
+	Errset(1);
+	//Message(prg_filename, "Error: "+ STmSchedTag+ " " + sTmSchedVal, 48);
+	msg = "Erreur d excution: "+prg_filename+":"+sTmSchedTag + " " + sTmSchedVal;
+	TmSched_Log(msg);
+END
+
+
+STRING FUNCTION TmSched_int2str(INT i)
+
+STRING s;
+	IF i < 10 THEN
+		s = "0"+IntToStr(i)
+	ELSE
+		s = IntToStr(i);
+ 	END
+ 	
+ 	RETURN(s);
+END
+
+
+FUNCTION TmSched_Log(STRING str)
+INT _hFile;
+INT hDev;
+STRING sFile;
+INT act_year;
+INT act_month;
+INT act_day;
+
+
+	ErrSet(1);
+	act_year		=DateYear(TimeCurrent(),1);
+	act_month      	=DateMonth(TimeCurrent());
+	act_day        	=DateDay(TimeCurrent());
+	
+	sFile = PathToStr("[DATA]:"+IntToStr(act_day)+"_"+IntToStr(act_month)+"_"+IntToStr(act_year)+"_TmSchedLog.txt")
+	_hFile=FileOpen(sFile,"a+");
+	FileWriteLn(_hFile, TmSched_int2str(act_day)+"/"+TmSched_int2str(act_month)+"/"+inttostr(act_year)+" "+Time(1)+": "+str);
+	FileClose(_hFile);
+	
+	/*
+	!au file de l'eau ..
+	hDev = DevOpen("fil_de_l_eau",0);
+	Dev<(hDev, str);
+	DevClose(hDev);
+	*/
+	
+	
+END
+
+
+
+
+//FUNCTION TmSchedGetLicense(the_citect_ini_filename:pchar):integer;stdcall;export;TmSchedLicenseDll.dll
+//
+
+INT FUNCTION TmSchedGetLicense()
+
+INT hDLL1=-1;
+INT Serial_OK;
+STRING sCitectIni;
+STRING sPath;
+
+    IF ServerInfoEx("ALARM", 0, "ALARM", TmSchedClusterName) <> "1" THEN
+       RETURN(1);
+    END
+	
+	sPath = ParameterGet("TmSched","Path","");
+	IF (StrRight(sPath, 1) = "\") THEN sPath = StrLeft(sPath, StrLength(sPath)-1); END
+
+        hDLL1 = DLLOpen(sPath+"\TmSchedLicenseDll", "TmSchedGetLicense", "JC");
+		IF hDLL1 =-1 THEN
+		//Message("Error DLL","TmSchedLicenseDll.DLL non found.",48);
+			RETURN(1);
+		END
+	sCitectIni = ServerInfo("Client",3);
+	//Message(sCitectIni, sCitectIni ,0);
+	Serial_OK = DLLCall(hDLL1,"^""+sCitectIni+"^"");
+ 	DLLClose(hDLL1);
+	RETURN(serial_ok);
+END

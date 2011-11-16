@@ -53,6 +53,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CicodeFileTests.cs" />
+    <Compile Include="Citect\IncludeTests.generated.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>IncludeTests.tt</DependentUpon>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Regression\RegressionTests.generated.cs">
       <AutoGen>True</AutoGen>
@@ -75,6 +80,39 @@
     <None Include="CicodeFileTests.tt">
       <LastGenOutput>CicodeFileTests1.cs</LastGenOutput>
     </None>
+    <None Include="Citect\IncludeTests.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>IncludeTests.generated.cs</LastGenOutput>
+    </None>
+    <None Include="Citect\Include\AFilter.ci" />
+    <None Include="Citect\Include\ANALYST.CI" />
+    <None Include="Citect\Include\citect.ci" />
+    <None Include="Citect\Include\CtTimeScheduler.ci" />
+    <None Include="Citect\Include\CtTimeSchedulerOverrides.ci" />
+    <None Include="Citect\Include\CTUTIL.CI" />
+    <None Include="Citect\Include\ddewrite.ci" />
+    <None Include="Citect\Include\DEBUG.CI" />
+    <None Include="Citect\Include\Display.ci" />
+    <None Include="Citect\Include\edtsp.cii" />
+    <None Include="Citect\Include\EventProcessing.ci" />
+    <None Include="Citect\Include\export.ci" />
+    <None Include="Citect\Include\FontDialog.ci" />
+    <None Include="Citect\Include\graph.ci" />
+    <None Include="Citect\Include\info.ci" />
+    <None Include="Citect\Include\ItemList.ci" />
+    <None Include="Citect\Include\MultiSignature.ci" />
+    <None Include="Citect\Include\numpad.ci" />
+    <None Include="Citect\Include\PADisplay.ci" />
+    <None Include="Citect\Include\page.ci" />
+    <None Include="Citect\Include\pareto.ci" />
+    <None Include="Citect\Include\spc.ci" />
+    <None Include="Citect\Include\spcplus.ci" />
+    <None Include="Citect\Include\statpop.ci" />
+    <None Include="Citect\Include\tag.ci" />
+    <None Include="Citect\Include\trend.ci" />
+    <None Include="Citect\Include\trninfo.ci" />
+    <None Include="Citect\Include\VerifyPrivilege.ci" />
+    <None Include="Citect\Include\zoom.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>
@@ -109,6 +147,9 @@
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Citect\Readme.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

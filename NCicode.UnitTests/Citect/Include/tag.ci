@@ -1,0 +1,764 @@
+/*
+**	FILE:	tag.ci
+**
+**	AUTHOR:	Martin Roberts / Rupert Reeve
+**
+**	DATE:	December 1994
+**
+**	NOTES:
+**
+**      This module contains various Tag and ASS functions.
+**
+**      Citect for Windows version 3.0 or higher is required.
+**      The parameter [GENERAL]TagDB=1(default) must be set.
+**
+*/
+
+/*	FUNCTION NAME: TagRamp
+**
+**	This function will increment a Tag by the amount defined by PerCentInc
+**
+**				-- PARAMETERS ---
+**	sTag   		= The Tag name as a String
+**	PercentInc 	= the amount to increment as a percentage of range
+**	Return Value: 0 if completed OK or an error code.
+*/	
+
+
+INT
+FUNCTION
+TagRamp(String sTag, Real PerCentInc)
+	Real   rZero, rFull, rRange, rNewValue;
+
+	rZero = TagGetProperty(sTag, "EngUnitsLow", 0);
+	rFull = TagGetProperty(sTag, "EngUnitsHigh", 0); 
+	rRange = rFull - rZero;
+	
+	IF rRange = 0 THEN 
+		Return 274;
+	ELSE
+		rNewValue = StrToReal(TagRead(sTag, 0)) + (rRange * PerCentInc / 100) ;
+	
+		IF rZero <= rNewValue AND rNewValue <= rFull THEN
+			TagWrite(sTag, rNewValue, 0);
+		ELSE
+			Return 257;
+		END
+	END
+
+	Return 0;
+END
+
+// Module variables for _ValueModifyForm function
+
+INT		hValueModifyForm; 	// Value modification form handle
+INT		hValueEditField;	// Editbox handle
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			_ValueModifyForm
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays an input box allowing the user to modify a string value.
+//			
+// 		ARGUMENTS:
+//
+//			sCurrentValue	- The existing value to modify.
+//			sDescription	- A description to be displayed on the value change form.
+//			
+//     	RETURNED VALUE: 
+//
+//			The new value if the user clicks 'OK', otherwise the original value if the user clicks 'Cancel'.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+STRING FUNCTION _ValueModifyForm(STRING sCurrentValue, STRING sDescription)
+
+	INT	nPixelsPerColumn	= 6;
+	INT	nPixelsPerRow		= 18;
+	INT nXPos				= 0;
+	INT nYPos				= 0;
+	
+	// Calculate the offset of the form to the page
+	nXPos = (StrToInt(PageInfo(12)) - 55 * nPixelsPerColumn)/ 2;
+	nYPos = (StrToInt(PageInfo(13)) - 6 * nPixelsPerRow) / 2;
+	
+	// Adjust form position in case the parent page was moved out of the default posistion (0,0)
+	nXPos = nXPos + StrToInt(PageInfo(14));
+	nYPos = nYPos + StrToInt(PageInfo(15));
+		
+	hValueModifyForm = FormNew("@(Enter a new value:)", 55, 6, 149 + 256);
+	FormPosition(nXPos, nYPos, 0);
+	FormPrompt(2, 0, sDescription);
+	hValueEditField = FormEdit(2, 2, sCurrentValue, 52);
+	FormButton(2, 4, "    @(Clear)    ", ClearValue, 0);
+	FormButton(23, 4, "    @(OK)    ", 0, 1);
+	FormButton(38, 4, "  @(Cancel)  ", 0, 2);
+
+	FormRead(0);
+	
+	RETURN sCurrentValue;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			ClearValue
+//
+//     	GENERAL DESCRIPTION
+//
+//			Callback function for used by _ValueModifyForm to clear the contents of the edit field.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			The result of resetting the text field on the form.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION ClearValue()
+	RETURN FormSetText(hValueModifyForm, hValueEditField, "");
+END
+
+
+/* variables for the TagDebug functions */
+
+STRING	sValue;         	! Value read or to write
+STRING	sTag;           	! Variable Tag name
+INT		hForm = -1;     	! Form handle
+/*
+**
+**      TagDebug()
+**
+**      Builds a form to provide simple user access to the all
+**      Variable Tags during runtime. Reading and writing are
+**      supported.
+**
+**      The Form is always ontop, and only one instance is allowed.
+**
+*/
+
+STRING
+FUNCTION
+TagDebug()
+
+	IF hForm = -1 THEN
+		sTag = "";
+		sValue = "";
+		hForm = FormNew("@(TagDebug)", 72, 3, 9);
+		FormComboBox(0 ,0, 59, 5, sTag, 1);
+		_tagDebugFillTagList();
+		FormEdit(0, 1, sValue, 34);
+		FormButton(60, 0, " " + "@(Read)" + "  ", _tagDebugRead, 0);
+		FormButton(60, 1, " " + "@(Write)" + " ", _tagDebugWrite, 0);
+		FormButton(60, 2, " " + "@(Close)" + " ", 0, 2);
+		FormRead(0);
+		hForm = -1;
+		return(sTag);
+	END
+END
+
+
+/*
+**      _tagDebugRead()
+**
+**      Callback for Read button. This function will read the tag
+**	from the I/O Device and display on the form.
+*/
+
+INT
+FUNCTION
+_tagDebugRead()
+        FormGetData(hForm);
+        sValue = TagRead(sTag, 0);
+        FormSetData(hForm);
+	RETURN	0;
+END
+
+
+/*
+**      _tagDebugWrite()
+**
+**      Callback for Write button. This function will write to the
+**	I/O Device from the value in the form.
+*/
+
+INT
+FUNCTION
+_tagDebugWrite()
+        FormGetData(hForm);
+        TagWrite(sTag, sValue, 0);
+	RETURN 0;
+END
+
+
+/*
+**      _tagDebugFillTagList()
+**
+**      Fill form list with the first 256 Variable Tags. We limit the
+**	maximum number of variables, otherwise the list box is too
+**	large and hard to use.
+*/
+
+FUNCTION
+_tagDebugFillTagList()
+        INT     nMaxList;
+        INT     nRec;
+        INT     hVarRDB		= -1;
+        INT		hLocVarRDB	= -1;
+        INT		hClustRDB	= -1;
+		INT		nClusters	= 0;
+		STRING	sCluster	= "";
+		
+        hClustRDB = RdbOpen("_CLUSTER");
+        IF hClustRDB >= 0 THEN
+        	nClusters = RdbNoRec(hClustRDB);	
+        	RdbClose(hClustRDB);
+        	hClustRDB = -1;
+		END
+		        
+        nMaxList = 256;
+        hVarRDB = RDBOpen("_VARIABL");
+        IF hVarRDB >= 0 THEN
+                nRec = RDBFirstRec(hVarRDB);
+                WHILE nMaxList >= 0 AND nRec >= 0  DO
+                        sTag = RDBGet(hVarRDB, "Tag");
+                        
+                        IF (nClusters > 1) THEN
+                        	sCluster = RdbGet(hVarRDB, "Cluster");
+                        	sTag = sCluster + "." + sTag;	
+                        END
+                        
+                        FormAddList(sTag);
+                        
+                        nRec = RDBNextRec(hVarRDB);                                
+                        nMaxList = nMaxList - 1;        
+                END
+		        RDBClose(hVarRDB);
+		        hVarRDB = -1;
+	    END
+	    
+	    IF nMaxList >= 0 THEN
+                hLocVarRDB = RDBOpen("_LOCVAR");
+                IF hLocVarRDB >= 0 THEN
+                        nRec = RDBFirstRec(hLocVarRDB);
+                        WHILE nMaxList >= 0 AND nRec >= 0  DO
+                                sTag = RDBGet(hLocVarRDB, "Name");
+                                FormAddList(sTag);
+                                nRec = RDBNextRec(hLocVarRDB);                                
+                                nMaxList = nMaxList - 1;        
+                        END
+		                RDBClose(hLocVarRDB);
+		                hLocVarRDB = -1;
+		        END
+	    END
+END
+                
+
+/*
+**	FUNCTION NAME: AssXXX
+**
+**	These are simple wrapper functions around the super genies to
+**	allow the user to do simple associations.
+**
+*/
+
+INT
+FUNCTION
+AssTag(INT nArg, STRING sTag, STRING sCluster = "")
+
+	RETURN Ass(WinNumber(), nArg, sTag, 0, sCluster);
+END
+
+FUNCTION
+AssVarTags(INT hWin, INT offset, STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "",
+ STRING sTag4 = "", STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "")
+
+	
+	Ass(hWin, offset + 1, sTag1, 0);
+	Ass(hWin, offset + 2, sTag2, 0);
+	Ass(hWin, offset + 3, sTag3, 0);
+	Ass(hWin, offset + 4, sTag4, 0);
+	Ass(hWin, offset + 5, sTag5, 0);
+	Ass(hWin, offset + 6, sTag6, 0);
+	Ass(hWin, offset + 7, sTag7, 0);
+	Ass(hWin, offset + 8, sTag8, 0);
+END
+
+INT
+FUNCTION
+AssPage(STRING sPage, STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "",
+ STRING sTag4 = "", STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "")
+
+	AssVarTags(WinNumber(), 0, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+
+	RETURN _PageDisplay(sPage);
+END
+
+INT
+FUNCTION
+AssMetadataPage(STRING sPage, INT nAN = -2)
+
+	AssMetadata(-2, nAN);
+
+	RETURN _PageDisplay(sPage);
+END
+
+
+INT
+FUNCTION
+AssMetadataWin(STRING sPage, INT x = 0, INT y = 0, INT mode = 0, INT nAN = -2)
+
+	AssMetadata(-2, nAN);
+
+	IF WinNewAt(sPage, x, y, mode) = -1 THEN
+		RETURN 269;
+	ELSE
+		RETURN 0;
+	END
+END
+
+
+INT
+FUNCTION
+AssMetadataPopUp(STRING sPage, INT nAN = -2)
+
+	INT		x, y;
+	REAL	ScaleX, ScaleY;
+	AssMetadata(-2, nAN);
+
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+	
+	IF WinNewAt(sPage, x, y, 1 + 8 + 32 + 256 + 512) = -1 THEN
+		RETURN 269;
+	ELSE
+		RETURN 0;
+	END
+END
+
+
+INT
+FUNCTION
+AssWin(STRING sPage, INT x = 0, INT y = 0, INT mode = 0, STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "",
+ STRING sTag4 = "", STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "")
+
+	AssVarTags(-2, 0, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+
+	
+	IF WinNewAt(sPage, x, y, mode) = -1 THEN
+		RETURN 269;
+	ELSE
+		RETURN 0;
+	END
+END
+
+
+INT
+FUNCTION
+AssPopUp(STRING sPage, STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "",
+ STRING sTag4 = "", STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "")
+
+	INT	x, y;
+	REAL	ScaleX, ScaleY;
+
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+	RETURN AssWin(sPage, x, y, 1 + 8 + 32 + 256 + 512, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+END
+
+
+INT
+FUNCTION
+AssChainPage(STRING sPage)
+
+	AssChain(WinNumber(), WinNumber(), 0);
+
+	RETURN _PageDisplay(sPage);
+END
+
+INT
+FUNCTION
+AssChainWin(STRING sPage, INT x = 0, INT y = 0, INT mode = 0)
+
+	AssChain(-2, WinNumber(), 0);
+
+	IF WinNewAt(sPage, x, y, mode) = -1 THEN
+		RETURN 269;
+	ELSE
+		RETURN 0;
+	END
+END
+
+INT
+FUNCTION
+AssChainPopUp(STRING sPage)
+	INT	x, y;
+	REAL	ScaleX, ScaleY;
+
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+	RETURN AssChainWin(sPage, x, y, 1 + 8 + 32 + 256 + 512);
+END
+
+/*	FUNCTION NAME: AssTitle
+**
+**	This function will set the Window Title according to the
+**	tag name of the first variable	assigned on the 
+**	page (ie ?INT 1?, ?Digital 1?). 
+**
+**				-- PARAMETERS ---
+**	CharMask   	= The Number of Characters to mask from the right of the Tag Name.
+**	Prefix		= a string to be added to the beginning of the Title
+** 	Suffix		= a string to be added to the end of the Title.
+**
+**	Parameters can all be left blank if required.
+**	Return Value : None.
+*/	
+
+FUNCTION
+AssTitle(Int CharMask=0, String Prefix="", String Suffix="")
+
+	WinTitle(Prefix + StrLeft(AssGetProperty(1, "TagName", 0),StrLength(AssGetProperty(1, "TagName", 0))-CharMask) + Suffix);
+END
+
+
+INT
+FUNCTION
+AssChainPopTrend(STRING sPage, STRING sTag1="", STRING sTag2="", STRING sTag3="",
+	 STRING sTag4="", STRING sTag5="", STRING sTag6="", STRING sTag7="", STRING sTag8="")
+
+	AssChain(-2, WinNumber(), 0);
+	RETURN TrendWin(sPage, 1, 1, 9, sTag1, sTag2, sTag3,sTag4,sTag5,sTag6,sTag7,sTag8);
+END
+
+FUNCTION
+AssPopTrend(STRING sPage,STRING sTag1="",STRING sTag2="",STRING sTag3="",STRING sTag4="",STRING sTag5="",STRING sTag6="",STRING sTag7="",STRING sTag8="")
+	
+	INT	x, y;
+	REAL	ScaleX, ScaleY;
+
+	DspGetMouse(x, y);
+
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x * ScaleX + StrToInt(PageInfo(14));
+	y = y * ScaleY + StrToInt(PageInfo(15));
+
+	IF x > WndInfo(0) - 150 THEN
+		x = x - 150;
+	ELSE
+		x = x + 50;
+	END
+	IF y > WndInfo(1) - 150 THEN
+		y = y - 150;
+	ELSE
+		y = y + 20;
+	END
+
+	x = x / ScaleX;
+	y = y / ScaleY;
+
+	AssVarTags(-2, 0, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+	TrendWin(sPage, x, y, 9, sTag1, sTag2, sTag3,sTag4,sTag5,sTag6,sTag7,sTag8);
+END	
+
+/*
+**	Function Name	: AssChainWinFree
+** 	Author		: Steve Schilg
+**	Date		: 2 May Feb 1996
+**	Revision	: 2.0
+**
+**	This function will save the Tag associations on an existing Super Genie, Close the 
+**	window then assign the tags to a new window. This allows a Super Genie Popup to 
+** 	call another popup and close the parent popup.
+**	
+*/
+
+INT
+FUNCTION
+AssChainWinFree(STRING sPage, INT x, INT y, INT Mode)
+
+	AssChain(-2, WinNumber(), 0);
+	WinFree();
+	IF WinNewAt(sPage, x, y, mode) = -1 THEN
+		RETURN 269;
+	ELSE
+		RETURN 0;
+	END
+END
+
+
+/*
+**	Function Name	: _DspBarScale
+** 	Author		: Steve Schilg
+**	Date		: 15 Feb 1995
+**	Revision	: Ver 1.0
+**
+**	This function will draw a scale to the left of a Bar near the 
+**	X Y location the calling Advanced Animation with the following command
+** 	IF StrToInt(PageInfo(7))=0 THEN Scale1();END
+**
+**	Color = Color number of the Scale (see Help - Color Names and Numbers)
+** 	Div   = Number of Divisions to place on the Scale
+*/
+
+FUNCTION
+_DspBarScale(String sColor="Black",INT Div=5)
+
+	INT 	hAn;
+	INT	hPlot;
+	INT	X;
+	INT	Y;
+	INT	Top;
+	INT	Left;
+	INT	Bottom;
+	INT	Right;
+	INT	AN;
+	INT	I;
+	INT	PlotAn;
+
+	AN=DspGetAnCur();					!Get Calling An
+	DspAnGetPos(AN, X, Y);					!Get position of Calling An
+	hAn=DspGetNearestAn(X, Y);	
+	WHILE (DspAnInfo(hAn, 0) <> "2") AND (I < 60) DO	!Check if bar found within 60 Pixels
+		I=I+1;
+		hAn=DspGetNearestAn(X+I, Y);			!Get handle of nearest An
+	END
+	IF DspAnInfo(hAn, 0)= "2" THEN 				!Check if bar found
+		
+		DspGetAnExtent(hAn, Top, Left, Bottom, Right);		!Get boundary of Nearest An
+		PlotAn = DspAnNewRel(hAn, -5, 0);				!Creat new An
+		hPlot = PlotOpen(PlotAn, "Display", 1);
+		PlotGrid(hPlot, 2, 0, Top-Bottom, 2, 0, 1, Transparent, 1, Transparent, 1, Dark_Grey, Transparent, 0);
+		PlotScaleMarker(hPlot, 0, 0, Div, 1, sColor, 1);
+		PlotClose(hPlot);
+	ELSE
+		prompt("@(Scale-can't find bar)");
+	END
+END
+
+/*
+**
+**      TagGetPropertyForeground()
+**
+**		Calls TagGetProperty and forces a cached read.  The hardware alarm is
+**		suppressed if the property is not ready or pending.
+**
+*/
+
+STRING
+FUNCTION
+TagGetPropertyForeground(STRING sName, STRING sProperty)
+
+	STRING	sResult;
+	INT		iError;
+
+	! Enable user error checking.
+	ErrSet(1);
+	
+	! Get the tag property from the cache.
+	sResult = TagGetProperty(sName, sProperty, 1);
+	
+	! Check for an error.
+	iError = IsError();
+	
+	! Disable user error checking.
+	ErrSet(0);
+	
+	! Set the hardware alarm unless the property value is not ready or pending.
+	IF iError <> 0 AND iError <> 423 AND iError <> 432 THEN
+		ErrTrap(iError, 0);
+	END
+	
+	RETURN sResult;
+
+END
+
+/*
+**
+**      TagGetScaleForeground()
+**
+**		Calls TagGetScale and forces a cached read.  The hardware alarm is
+**		suppressed if the property is not ready or pending.
+**
+*/
+
+STRING
+FUNCTION
+TagGetScaleForeground(STRING sName, INT iPercent, INT iEngUnits)
+
+	STRING	sResult;
+	INT		iError;
+
+	! Enable user error checking.
+	ErrSet(1);
+	
+	! Get the tag scale from the cache.
+	sResult = TagGetScale(sName, iPercent, iEngUnits, 1);
+	
+	! Check for an error.
+	iError = IsError();
+	
+	! Disable user error checking.
+	ErrSet(0);
+	
+	! Set the hardware alarm unless the property value is not ready or pending.
+	IF iError <> 0 AND iError <> 423 AND iError <> 432 THEN
+		ErrTrap(iError, 0);
+	END
+	
+	RETURN sResult;
+
+END
+
+/*
+**
+**      AssGetPropertyForeground()
+**
+**		Calls AssGetProperty and forces a cached read.  The hardware alarm is
+**		suppressed if the property is not ready or pending.
+**
+*/
+
+STRING
+FUNCTION
+AssGetPropertyForeground(STRING sArg, STRING sProperty)
+
+	STRING	sResult;
+	INT		iError;
+
+	! Enable user error checking.
+	ErrSet(1);
+	
+	! Get the association property from the cache.
+	sResult = AssGetProperty(sArg, sProperty, 1);
+	
+	! Check for an error.
+	iError = IsError();
+	
+	! Disable user error checking.
+	ErrSet(0);
+	
+	! Set the hardware alarm unless the property value is not ready or pending.
+	IF iError <> 0 AND iError <> 423 AND iError <> 432 THEN
+		ErrTrap(iError, 0);
+	END
+	
+	RETURN sResult;
+
+END
+
+/*
+**
+**    Pulser()
+**
+**	  Spawns a task to run the GoPulse() until complete. This pulses a tag.
+**    This function will spawn a fresh task each time.
+**    Errors will cause a h/w alarm however PulseLastError() and PulseLastErrorTag()
+**    are available to get more information.
+*/
+
+FUNCTION Pulser(STRING sTAGNAME, STRING sCLUSTER = "")
+    INT hTask;
+    INT lastErrorCode;
+    
+	ErrSet(1);
+	
+    hTask = TaskNew("GoPulse","^"" + sTAGNAME + "^",^"" + sCLUSTER + "^"",0,sCLUSTER);
+	IF (hTask < 0) THEN
+		// Unable to create task (at task limit ?)
+		lastErrorCode 	= IsError();
+		ErrSetHw(2, lastErrorCode, 0);
+		ErrLog("Error using system cicode Pulser() function: Tag '" + sTAGNAME + "' Cicode error " + IntToStr(lastErrorCode));	
+	END 
+	ErrSet(0);
+END
+
+/*
+**
+**    GoPulse()
+**
+**		This function will set the passed variable high then place it low 2 seconds later.
+**    Error handling 
+*/
+
+FUNCTION GoPulse(STRING sTAGNAME, STRING sCLUSTER = "")
+	INT 	tagNameLength = StrLength(sTAGNAME);
+	INT 	tagHasDot 		= -1; 
+	STRING 	sAssString 		= "";
+	STRING 	sOriginalTag	= "";
+	INT 	nError          = 0;
+	
+	IF (tagNameLength > 0) THEN
+	    // Ensure we don't do work with an empty reference 
+		IF StrGetChar(sTAGNAME, 0) = StrToChar("?") THEN
+			// Strip the ? characters from the start and end of the super genie ass number
+			sAssString = StrLeft(sTAGNAME, tagNameLength - 1);
+			sAssString = StrRight(sAssString, tagNameLength - 2);
+			
+			sOriginalTag = sTAGNAME;
+			ErrSet(1);
+			sTAGNAME = AssGetProperty(sAssString, "FullName");
+			nError 	= IsError();
+			ErrSet(0);
+			
+			tagNameLength = StrLength(sTAGNAME);
+		END
+
+		IF (tagNameLength > 0) THEN	
+		    // Do this check again in case the AssGetProperty() did not work	
+			tagHasDot = StrSearch(0, sTAGNAME, ".");
+			IF (tagHasDot >= 1) THEN
+			  	// This tag has a Cluster reference so null any passed cluster reference
+			  	// Assume ".tag" is not part of this logic
+			  	sCLUSTER = "";
+			END
+
+		    nError = TagWrite(sTAGNAME,1,0,TRUE,sCLUSTER); // Synchronous write
+		    IF (nError = 0) THEN
+		   		Sleep(2);
+		    	TagWrite(sTAGNAME,0,0,TRUE,sCLUSTER);      // Synchronous write
+		    ELSE
+		    	// Problem in Tag write
+				ErrSetHw(2, nError, 0);	
+				ErrLog("Error using system cicode Pulser(*) function: Tag '" + sTAGNAME + "', Cicode error " + IntToStr(nError));
+		    END
+    	ELSE
+    	
+    	    // This code path means the AssGetProperty() has failed to establish the tag 
+    	    IF (nError = 0) THEN
+    	       // Tests showed that an invalid genie tag was returning no error so correct it to something
+    	       nError = 424;  		// Tag not found
+    	    END
+			ErrSetHw(2, nError, 0);	
+			ErrLog("Error using system cicode Pulser(*) function: Genie Item '" + sOriginalTag + "', Cicode error " + IntToStr(nError));
+
+    	END
+    	
+	ELSE
+	
+	    // Passed tag name is blank
+		ErrSetHw(2, 289, 0);	// Set Name does not exist error
+		ErrLog("Error using system cicode Pulser(*) function: Tagname blank, Cicode error " + IntToStr(289));
+
+	END
+END
+
+
+

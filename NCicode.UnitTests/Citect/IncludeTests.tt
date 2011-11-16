@@ -1,0 +1,7 @@
+﻿<#@ template debug="false" hostspecific="true" language="C#" #>
+<#@ output extension=".generated.cs" #>
+<#@ include file="..\CicodeFileTests.tt" #>
+
+<#
+GenerateTestClass("IncludeTests", "NCicode.UnitTests.Citect", "Include", "ShouldParseFile_");
+#>

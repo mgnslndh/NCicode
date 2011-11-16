@@ -1,0 +1,293 @@
+/*
+**	FILE:	PARETO.CI
+**
+**
+**	FUNCTIONS:
+**		User functions
+**			_ParetoNoTagsSet
+**			LoadTags;
+**			ParetoPlot;
+**			TableScaleMax;
+**			DspParetoText;
+**			DspParetoVal;
+**
+**		System function
+**
+**
+**
+**	NOTE:	Variable Information;
+**
+**		Data type BINARY is a special Citect LABEL for cicode data type (INT)
+**
+**		Variable Prefixes;
+**		h		Local function var handle type	(cicode int)
+**		i		Local function var integer type
+**		b		Local function var binary type	(cicode int, uses BINARY substitition as above)
+**		s		Local function var string type
+**		r		Local function var real type
+**
+**		gh		Global file var handle type	(cicode int)
+**		gi		Global file var integer type
+**		gb		Global file var binary type	(cicode int, uses BINARY substitition as above)
+**		gs		Global file var string type
+**		gr		Global file var real type
+**
+**		_		Label defined in LABELS.DBF (remaining letters capitalised)
+**
+**		none of above	Any variable starting with a capital letter is a VARIABLE TAG as defined
+**				in the Variable Tags database
+**			
+*/
+
+/* GLOBAL CONSTANTS */
+
+ 	INT	giNoOfTags = 27;
+
+/* GLOBAL VARS */
+
+	STRING	gsTableDescriptions[27];
+	STRING	gsTableTagNames[27];
+	REAL	grTableTagValues[27];
+	INT	giTableIndexToStr[27];
+	REAL	grTotalOfValues;
+	REAL	xTable[27];
+	REAL	yTable[27];
+	INT		ghTextFont = -1;
+
+
+/*
+**	FUNCTION NAME:	_ParetoNoTagsSet
+**
+**	DESCRIPTION:	Sets the global variable which determines the number of
+**				tags to be plotted.
+**
+*/
+
+FUNCTION 
+_ParetoNoTagsSet(INT iNum)
+
+	giNoOfTags = iNum;
+END
+
+/*
+**	FUNCTION NAME:		LoadTags
+**
+**	FUNCTION DESCRIPTION:	This function is used to load the tags and their descriptions to the global bufffer.
+**				It can setup three tags indentified as Tag1,Tag2,Tag3, the Offset is the order of the
+**				first tag in all tag group.
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96	Jeffrey Sun	Original
+**
+**	SOURCE:		Called from the five advanced animation on the Pareto page.
+**	ARGUMENTS:		As described above.
+**
+**
+**
+**	NOTES:
+*/
+
+FUNCTION
+LoadTags(INT OffSet,STRING Lable1="",STRING Tag1="",STRING Lable2="",STRING Tag2="",STRING Lable3="",STRING Tag3="")
+	
+	IF StrToInt(PageInfo(7)) > 0 THEN
+		RETURN;
+	END
+ 
+/* Transfering to Buf */
+	gsTableDescriptions[Offset]=Lable1;
+	gsTableTagNames[offset]=Tag1;
+	gsTableDescriptions[Offset+1]=Lable2;
+	gsTableTagNames[offset+1]=Tag2;
+	gsTableDescriptions[Offset+2]=Lable3;
+	gsTableTagNames[offset+2]=Tag3;
+END
+
+
+/*
+**	FUNCTION NAME:		ParetoPlot
+**
+**	FUNCTION DESCRIPTION:	This function is used to Plot the bar picture.
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96		Jeffrey Sun	Original
+**
+**	SOURCE:			Called from the advanced animation on the upper-left corner of the plot area.
+**	ARGUMENTS:
+**	        iBoxLength      Length of the plot area
+**              iBoxHeight      Height of the plot area
+**
+**
+**	NOTES:
+*/
+
+FUNCTION
+ParetoPlot(INT iBoxlength,INT iBoxHeight, INT iNoTags = 15)
+
+	INT	hPlot;
+	INT	iTag;
+	INT	j;
+	INT	k;
+	REAL	TempV;
+	STRING	TempS;
+	INT	iTemp;
+	INT	TempO;
+	INT	OffPosX;
+	INT	OffPosY;
+	INT	xTableOff;
+	INT	hpg;
+	INT	hAnPlot;
+
+	hAnPlot = DspGetAnCur();
+
+	_ParetoNoTagsSet(iNoTags);
+	
+	FOR iTag = 0 TO giNoOfTags - 1 DO
+		giTableIndexToStr[ iTag] = iTag;
+	END
+
+	WHILE 1 DO
+		FOR iTag = 0 TO giNoOfTags -1 DO
+			IF StrTrim( gsTableTagNames[giTableIndexToStr[iTag]]) <> "" THEN
+				grTableTagValues[ iTag] = StrToReal( TagRead( gsTableTagNames[ giTableIndexToStr[ iTag]]));
+			ELSE
+				grTableTagValues[ iTag]=0;
+			END
+		END
+ 
+ /* Sorting---Bubble */
+		FOR iTag = 0 TO giNoOfTags-2 DO
+        		FOR j = 0 TO giNoOfTags-2-iTag DO
+				IF grTableTagValues[j]<grTableTagValues[j+1] THEN
+					TempV=grTableTagValues[j];
+					grTableTagValues[j]=grTableTagValues[j+1];
+					grTableTagValues[j+1]=TempV;
+
+					iTemp=giTableIndexToStr[j];
+					giTableIndexToStr[j]=giTableIndexToStr[j+1];
+					giTableIndexToStr[j+1]=iTemp;
+                       	END
+			END
+		END
+
+/* Plotting */
+		hPlot=PlotOpen(hAnPlot,"Display",1);
+		IF hPlot<>-1 THEN
+			hpg=PlotGrid(hPlot,giNoOfTags,0,0,iBoxlength,iBoxHeight,giNoOfTags,red,10,blue,1,black,grey,0);
+			grTotalOfValues=0.0;
+
+			FOR iTag = 0 TO giNoOfTags-1 DO
+				grTotalOfValues=grTotalOfValues+grTableTagValues[ iTag];
+			END
+
+			xTableOff=0.0;
+			offPosY=0;
+
+			IF grTotalOfValues<>0.0 THEN
+
+				FOR iTag = 0 TO giNoOfTags-1 DO
+					OffPosX=grTableTagValues[iTag]*iboxlength/grTotalOfValues;
+
+					PlotDraw(hPlot,1,0,black,1,green,0,OffPosY,OffPosX, (iTag+1) * iBoxHeight / giNoOfTags);
+					offPosY = (iTag+1) * iBoxHeight / giNoOfTags - 1.0;
+					xTable[iTag] = xTableOff + OffPosX;
+					yTable[iTag] = (0.5 + iTag) * iboxHeight / giNoOfTags;
+					xTableOff = xTable[iTag];
+				END
+
+				hpg=PlotXYLine(hPlot,0,red,1,3,black,1,giNoOfTags,xtable,0,iboxLength,ytable,0,iBoxHeight,4);
+			END
+			PlotClose(hPlot);
+		END
+		Sleep(5);
+	END
+END
+
+
+/*
+**	FUNCTION NAME:		TableScaleMax
+**
+**	FUNCTION DESCRIPTION:	This function is returen the frequency number at the top of the plot area
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96	Jeffrey Sun	Original
+**
+**	SOURCE:		Called from the five number animation at the top of the plot area
+**	ARGUMENTS:
+**
+**	RETURNED VALUE:
+**
+**	NOTES:
+*/
+
+REAL
+FUNCTION
+TableScaleMax()
+	RETURN     grTotalOfValues;
+END
+
+/*
+**	FUNCTION NAME:		DspParetoText
+**
+**	FUNCTION DESCRIPTION:	This function is used to return the variable descriptions.
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96	Jeffrey Sun	Original
+**	2.0	22/6/2010	=SE=	Add optional iWidth argument to function
+**
+**	SOURCE:		Called from the fifteen string animation on the pareto page
+**	ARGUMENTS:
+**		iVariableNo	the box number on the page
+**		iWidth		the maximum width of the text in pixels, default = -1 (no limit)
+**
+**	RETURNED VALUE:
+**	        Description	If existed
+**		blank		If not existed
+**
+**	NOTES:
+*/
+
+STRING
+FUNCTION
+DspParetoText(INT iVariableNo, INT iWidth = -1)
+	IF iVariableNo>=0 and iVariableNo<=giNoOfTags-1 THEN
+		IF iWidth > 0 THEN
+			IF ghTextFont < 0 THEN
+				ghTextFont = DspFont("Arial", -10, BLACK, TRANSPARENT);
+			END
+			RETURN StrTruncFontHnd(StrToLocalText(gsTableDescriptions[giTableIndexToStr[iVariableNo]]), ghTextFont, iWidth, 1);
+		END
+		RETURN gsTableDescriptions[giTableIndexToStr[iVariableNo]];
+	ELSE
+		RETURN "";
+	END
+END
+
+/*
+**	FUNCTION NAME:	        DspParetoVal
+**
+**	FUNCTION DESCRIPTION:	This function is used to return the value of the frequency
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96		Jeffrey Sun	Original
+**
+**	SOURCE:         	Called from the fifteen string animation on the pareto page
+**	ARGUMENTS:
+**	iVariableNo             the box number on the page
+**
+**	RETURNED VALUE:
+**              Value   	If existed
+**		blank		If not existed
+**
+**	NOTES:
+*/
+
+STRING
+FUNCTION
+DspParetoVal(INT iVariableNo)
+	IF StrTrim(gsTableTagNames[giTableIndexToStr[ iVariableNo]])=""    THEN
+		RETURN "";
+	ELSE
+	   	RETURN StrTrim( RealToStr( grTableTagValues[ iVariableNo], 4,0));
+	END
+END

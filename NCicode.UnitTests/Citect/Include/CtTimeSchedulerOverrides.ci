@@ -1,0 +1,515 @@
+//***********************************************************************
+//
+//	Citect Time Scheduler
+//  updated 17/01/2005
+//	
+//***********************************************************************
+
+
+
+STRING TmSched_DRTags_Name[200];
+INT    TmSched_DRTags_Time[200];
+INT    TmSched_DRTags_Count;
+
+
+STRING TmSched_DRSeqs_Name[200];
+INT    TmSched_DRSeqs_Time[200];
+INT    TmSched_DRSeqs_Count;
+
+
+STRING TmSched_tmpStringList[200];
+
+
+
+FUNCTION TmSched_InitOverridesVarList()
+
+INT hFile;
+INT Counter=0;
+STRING Buffer="";
+STRING sVar, sDate, sTime;
+STRING sLogFile;
+INT hLogFile;
+
+
+   ErrSet(1);
+
+   counter=0;
+   TmSched_DRTags_Count=counter;
+   if Fileexist(TmSched_act_path + "OverridesVar.lst") then
+	hFile = FileOpen(TmSched_act_path + "OverridesVar.lst","r");
+	sLogFile = PathToStr("[DATA]:"+"OverridesVar.log");
+    hLogFile = FileOpen(sLogFile ,"w+");
+	
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				counter=counter+1;	
+				sVar                     = StrWord(Buffer);
+				sDate                    = StrWord(Buffer);
+				sTime                    = StrWord(Buffer);
+				TmSched_DRTags_Name[counter] = StrUpper(sVar);
+				TmSched_DRTags_Time[counter] = strtodate(sDate)+StrToTime(sTime);
+				FileWriteLn(hLogFile , sVar+";"+sDate+";"+sTime+"          "+
+				            TimeToStr(TmSched_DRTags_Time[counter],9)+";"+
+				            TimeToStr(TmSched_DRTags_Time[counter],1));
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+	FileClose(hLogFile);
+	TmSched_DRTags_Count=counter;
+   end
+END
+
+
+
+
+
+INT FUNCTION TmSched_CheckOverridesVarList(STRING sTag)
+
+INT i;
+STRING s_Tag;
+
+	// RETURN 0 execute sequence
+	// Return 1 STOP !!!    not do it ...
+	
+
+
+
+	s_Tag  = StrUpper(sTag);
+	FOR i = 1 TO TmSched_DRTags_Count DO
+			IF (TmSched_DRTags_Name[i] = s_Tag) THEN
+					IF ( TmSched_DRTags_Time[i] > TimeCurrent() ) THEN
+						RETURN(1)
+					END
+			END
+	END // for ...
+	RETURN(0);
+END
+
+
+
+
+
+FUNCTION TmSched_Show_DR_VarList()
+INT i,result;
+STRING sBuf,Buffer;
+
+	FormNew("@(List of disabled tags)",44,11,1+16);
+	FormListBox(2 ,1, 40, 9, sBuf, 1);
+	FOR i = 1 TO TmSched_DRTags_Count DO
+			FormAddList(TmSched_DRTags_Name[i]);
+	END;
+	FormButton( 33, 10 ,"   OK   ", 0, 1);
+	FormRead(0);	
+END
+
+
+
+
+FUNCTION TmSched_Show_DR_SeqList()
+INT i,result;
+STRING sBuf,Buffer;
+
+	FormNew("@(List of disabled programs)",44,11,1+16);
+	FormListBox(2 ,1, 40, 9, sBuf, 1);
+	FOR i = 1 TO TmSched_DRSeqs_Count DO
+			FormAddList(TmSched_DRSeqs_Name[i]);
+	END;
+	FormButton( 33, 10 ,"   OK   ", 0, 1);
+	FormRead(0);	
+END
+
+
+
+
+
+
+FUNCTION TmSched_InitOverridesSeqList()
+
+INT hFile,hLogFile;
+INT Counter=0;
+STRING Buffer="";
+STRING sSeq, sDate, sTime;
+STRING sLogFile;
+
+
+	counter=0;
+	TmSched_DRSeqs_Count=counter;
+	sLogFile = PathToStr("[DATA]:"+"OverridesSeq.log");
+        hLogFile = FileOpen(sLogFile ,"w+");
+	hFile = FileOpen(TmSched_act_path + "OverridesSeq.lst","r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				counter=counter+1;	
+				sSeq                     = StrWord(Buffer);
+				sDate                    = StrWord(Buffer);
+				sTime                    = StrWord(Buffer);
+				TmSched_DRSeqs_Name[counter] = strupper(sSeq);
+				TmSched_DRSeqs_Time[counter] = StrToDate(sDate)+StrToTime(sTime);
+				FileWriteLn(hLogFile , sSeq+";"+sDate+";"+sTime+"           "+
+				                       TimeToStr(TmSched_DRSeqs_Time[counter],9)+";"+
+				                       TimeToStr(TmSched_DRSeqs_Time[counter],1));
+			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+	FileClose(hLogFile);
+	TmSched_DRSeqs_Count=counter;
+END
+
+
+
+
+	
+INT FUNCTION TmSched_CheckOverridesSeqList(STRING sSeq)
+
+INT i;
+STRING s_Seq;
+
+	// RETURN 0 execute sequence
+	// Return 1 STOP !!!    not do it ...
+	
+
+	s_Seq  = StrUpper(sSeq);
+	FOR i = 1 TO TmSched_DRSeqs_Count DO
+			//Message(	TmSched_DRSeqs_Name[i], s_Seq,0);
+			IF (TmSched_DRSeqs_Name[i] = s_Seq) THEN
+					IF ( TmSched_DRSeqs_Time[i] > TimeCurrent() ) THEN
+						RETURN(1)
+					END
+			END
+	END // for ...
+	RETURN(0);
+END
+
+
+
+
+
+FUNCTION TmSched_Overrides_DisableTag(sTring sTag,STRING sDate,STRING sTime)
+       
+INT hFile;
+STRING Buffer="";
+STRING sVar;
+STRING sLogFile;
+INT hLogFile;
+INT TagAlreadyDone;
+
+
+    ErrSet(1);
+
+    TmSched_Get_PRI_STBY_path();
+
+	//Message(glob_TmSched_Pri_Path, glob_TmSched_STBY_Path,0);
+
+    // glob_TmSched_Pri_Path;
+    // glob_TmSched_Stby_Path;
+
+    sLogFile = PathToStr("[DATA]:"+"OverridesVar.log");
+    hLogFile = FileOpen(sLogFile ,"w+");
+    FileWriteLn(hLogFile , "Disable: "+sVar+";"+sDate+";"+sTime);
+    FileClose(hLogFile);
+
+
+    TagAlreadyDone = false;
+    if Fileexist(glob_TmSched_Pri_Path + "OverridesVar.lst") then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesVar.lst","r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                                if svar = stag then
+                                    TagAlreadyDone = true;
+                                end
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    end
+    if not TagAlreadyDone then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesVar.lst","a+");
+	IF hFile <> -1 THEN
+		FileWriteLn(hFile,sTag+CharToStr(9)+sDate+CharToStr(9)+sTime);
+        end
+	FileClose(hFile);
+    end
+
+    TagAlreadyDone = false;
+    if Fileexist(glob_TmSched_STBY_Path + "OverridesVar.lst") then
+	hFile = FileOpen(glob_TmSched_STBY_Path  + "OverridesVar.lst","r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                                if svar = stag then
+                                    TagAlreadyDone = true;
+                                end
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    end
+    if not TagAlreadyDone then
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesVar.lst","a+");
+	IF hFile <> -1 THEN
+		FileWriteLn(hFile,sTag+CharToStr(9)+sDate+CharToStr(9)+sTime);
+        end
+	FileClose(hFile);
+    end
+
+
+END
+
+
+
+FUNCTION TmSched_Overrides_EnableTag(STRING sTag)
+       
+INT i,hFile;
+STRING Buffer="";
+STRING sVar;
+STRING sLogFile;
+INT hLogFile;
+INT counter=0;
+
+
+    ErrSet(1);
+    
+    TmSched_Get_PRI_STBY_path();
+
+
+    // glob_TmSched_Pri_Path;
+    // glob_TmSched_Stby_Path;
+
+    sLogFile = PathToStr("[DATA]:"+"OverridesVar.log");
+    hLogFile = FileOpen(sLogFile ,"w+");
+    FileWriteLn(hLogFile , "Enable: "+sVar);
+    FileClose(hLogFile);
+
+
+    IF Fileexist(glob_TmSched_Pri_Path + "OverridesVar.lst") then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesVar.lst","r+");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+            TmSched_tmpStringList[counter] = Buffer;
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                      IF svar <> stag THEN
+                                    counter = counter + 1;
+                      END
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    END
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesVar.lst","w+");
+	IF hFile <> -1 THEN
+       FOR i = 0 TO counter-1 DO
+               FileWriteLn(hFile ,TmSched_tmpStringList[counter]);  
+       END
+       FileClose(hFile);
+    END
+
+    IF FileExist(glob_TmSched_STBY_Path + "OverridesVar.lst") THEN
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesVar.lst","r+");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+            TmSched_tmpStringList[counter] = Buffer;
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                      IF svar <> stag THEN
+                                    counter = counter + 1;
+                      END
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    END
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesVar.lst","w+");
+	IF hFile <> -1 THEN
+       FOR i = 0 TO counter-1 DO
+               FileWriteLn(hFile ,TmSched_tmpStringList[counter]);  
+       END
+       FileClose(hFile);
+    END
+
+
+
+END
+
+
+
+
+
+
+FUNCTION TmSched_Overrides_DisableSeq(STRING sSequence,STRING sDate,STRING sTime)
+       
+INT hFile;
+STRING Buffer="";
+STRING sLogFile;
+INT hLogFile;
+INT TagAlreadyDone;
+STRING sVar;
+
+
+    ErrSet(1);
+    TmSched_Get_PRI_STBY_path();
+
+    // glob_TmSched_Pri_Path;
+    // glob_TmSched_Stby_Path;
+
+    sLogFile = PathToStr("[DATA]:"+"OverridesSeq.log");
+    hLogFile = FileOpen(sLogFile ,"w+");
+    FileWriteLn(hLogFile , "Disable: "+sSequence+";"+sDate+";"+sTime);
+    FileClose(hLogFile);
+
+
+    TagAlreadyDone = false;
+    if Fileexist(glob_TmSched_Pri_Path + "OverridesSeq.lst") then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesSeq.lst","r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                                if svar = sSequence THEN
+                                    TagAlreadyDone = true;
+                                end
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    end
+    if not TagAlreadyDone then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesSeq.lst","a+");
+	IF hFile <> -1 THEN
+		FileWriteLn(hFile,sSequence+CharToStr(9)+sDate+CharToStr(9)+sTime);
+        end
+	FileClose(hFile);
+    end
+
+    TagAlreadyDone = false;
+    if Fileexist(glob_TmSched_STBY_Path + "OverridesSeq.lst") then
+	hFile = FileOpen(glob_TmSched_STBY_Path  + "OverridesSeq.lst","r");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                                if svar = sSequence THEN
+                                    TagAlreadyDone = true;
+                                end
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    end
+    if not TagAlreadyDone then
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesSeq.lst","a+");
+	IF hFile <> -1 THEN
+		FileWriteLn(hFile,sSequence+CharToStr(9)+sDate+CharToStr(9)+sTime);
+        end
+	FileClose(hFile);
+    end
+
+
+END
+
+
+FUNCTION TmSched_Overrides_EnableSeq(STRING sSequence)
+       
+INT i,hFile;
+STRING Buffer="";
+STRING sLogFile;
+INT hLogFile;
+INT counter=0;
+STRING svar;
+
+
+    ErrSet(1);
+    TmSched_Get_PRI_STBY_path();
+
+    // glob_TmSched_Pri_Path;
+    // glob_TmSched_Stby_Path;
+
+    sLogFile = PathToStr("[DATA]:"+"OverridesSeq.log");
+    hLogFile = FileOpen(sLogFile ,"w+");
+    FileWriteLn(hLogFile , "Enable: "+sSequence);
+    FileClose(hLogFile);
+
+
+    IF Fileexist(glob_TmSched_Pri_Path + "OverridesSeq.lst") then
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesSeq.lst","r+");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+            TmSched_tmpStringList[counter] = Buffer;
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                      IF svar <> sSequence THEN
+                                    counter = counter + 1;
+                      END
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    END
+	hFile = FileOpen(glob_TmSched_Pri_Path + "OverridesSeq.lst","w+");
+	IF hFile <> -1 THEN
+       FOR i = 0 TO counter-1 DO
+               FileWriteLn(hFile ,TmSched_tmpStringList[counter]);  
+       END
+       FileClose(hFile);
+    END
+
+    IF FileExist(glob_TmSched_STBY_Path + "OverridesSeq.lst") THEN
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesSeq.lst","r+");
+	IF hFile <> -1 THEN
+		WHILE NOT FileEOF(hFile) DO
+			Buffer=FileReadLn(hFile);
+            TmSched_tmpStringList[counter] = Buffer;
+			IF buffer <> "" THEN
+				sVar = StrWord(Buffer);
+                      IF svar <> sSequence THEN
+                                    counter = counter + 1;
+                      END
+ 			END
+		END // while ...
+	END// if hfile ...
+	FileClose(hFile);
+    END
+	hFile = FileOpen(glob_TmSched_STBY_Path + "OverridesSeq.lst","w+");
+	IF hFile <> -1 THEN
+       FOR i = 0 TO counter-1 DO
+               FileWriteLn(hFile ,TmSched_tmpStringList[counter]);  
+       END
+       FileClose(hFile);
+    END
+
+
+
+END
+
+
+
+
+FUNCTION test1()
+
+//         TmSched_Overrides_DisableTag("Light2","12/12/2004","12:33:44")
+         TmSched_Overrides_DisableSeq("All_lights_off","12/12/2004","12:33:44")
+END
+
+
+FUNCTION test2()
+
+//         TmSched_Overrides_EnableTag("Light2");
+         TmSched_Overrides_EnableSeq("All_lights_off");
+
+END

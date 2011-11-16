@@ -1,0 +1,42 @@
+/*
+**	FILE:	trninfo.ci
+**
+**	AUTHOR:	Erhan Izmir
+**
+**	DATE:	June	1996
+**
+**	REVISION:
+**
+**	1.0	First revision for release 1.0.
+**
+**	This file contains a set of trend client info functions. The
+**	trend client info is obtained from a trend control block. The
+**	trend control block is created when a trend is displayed,
+**	therefore the following functions can only be used when
+**	the trend is being displayed.
+**
+*/
+
+
+/* trend client info types */
+
+INT	TRN_CLIENT_INFO_TYPE_NO_SAMPLES	= 1;
+
+/*
+**	FUNCTION NAME:	TrnSamplesConfigured
+**
+**	This function is called to get the number of samples
+**	configured for the trend that is being displayed. 
+**
+*/
+
+
+INT
+FUNCTION
+TrnSamplesConfigured(INT hAn)
+	
+	INT	err;
+	
+	RETURN StrToInt(TrnClientInfo(hAn,-1,TRN_CLIENT_INFO_TYPE_NO_SAMPLES,"",err));
+END
+

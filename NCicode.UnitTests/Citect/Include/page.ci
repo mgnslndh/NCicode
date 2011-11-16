@@ -1,0 +1,467 @@
+/*
+**	FILE:	page.ci
+**
+**	AUTHOR:	Martin Roberts
+**
+**	DATE:	March 1992
+**
+**	REVISION:
+**
+**	1.0	First revision for release 1.0.
+**      3.0     Support for new templates
+**
+**	NOTES:
+**
+**	1. This handles the common animations to be displayed on 
+**      every page in the sytem. Each animation may be enabled 
+**      or disabled via the parameters database.
+**
+**      2. New templates do not use this cicode to display the
+**      time, date, alarm status etc. The page enviroment
+**      variable PageCicodeOn is used to flag if the cicode is
+**      required.
+**
+*/
+
+/*
+**	The constants for PageHistory... Cicode functions.
+*/
+
+	INT	c_PAGEHISTORY_TYPE_ALL = 0;			// all history type
+	INT	c_PAGEHISTORY_TYPE_BACK = 1;		// backword history type
+	INT	c_PAGEHISTORY_TYPE_FORWARD = 2;		// forward history type
+
+/*
+**	The animation numbers for the default animation. If the animation
+**	number is set to 0 the animation will not be displayed.
+*/
+
+	INT	hAnUAlarm;
+	INT	hAnHAlarm;
+	INT	hAnDAlarm;
+	INT	hAnLastAlarm;
+	INT	hAnTime;
+	INT	hAnDate;
+	INT	hAnName;
+	INT	hAnTitle;
+
+	INT	hDefaultFont;
+	INT	hTimeFont;
+	INT	hUnAckFont;
+	INT	hHwFont;
+	INT	hButtonFont;
+	INT	bMenuShutdown;
+	INT	bMenuDisable;
+
+	INT	hLastAlarmFmt;
+	INT	bPopupHelpMode = 1;
+
+	INT	nLastAlmDspMode;
+/*
+**	FUNCTION NAME:	_PageDefInit
+**
+**	This function is called at startup to initialize the default
+**	animation data. The animation numbers are loaded from the
+**	parametes database. If the animation number is 0 then the
+**	animation will not be displayed.
+**
+*/
+
+FUNCTION
+_PageDefInit()
+
+	hAnUAlarm	= ParameterGet("Page", "Alarm",		"5");
+	hAnHAlarm	= ParameterGet("Page", "HwAlarm",	"6");
+	hAnDAlarm	= ParameterGet("Page", "DisabledAlarm", "7");
+	hAnTime		= ParameterGet("Page", "Time",		"9");
+	hAnDate		= ParameterGet("Page", "Date",		"10");
+	hAnLastAlarm	= ParameterGet("Page", "LastAlarm",	"11");
+	hAnTitle	= ParameterGet("Page", "Title",		"12");
+	hAnName		= ParameterGet("Page", "Name",		"13");
+	
+	hDefaultFont	= DspFontHnd("DefaultFont");
+	hTimeFont	= DspFontHnd(ParameterGet("Font", "Time", "TimeFont"));
+	hUnAckFont	= DspFontHnd("UnacceptedFont");
+	hHwFont		= DspFontHnd("HardwareFont");
+	hButtonFont 	= DspFontHnd("ButtonFont");
+
+	OnEvent(10, _PageDefDisplay);
+
+	bMenuShutdown	= ParameterGet("Page", "MenuShutdown", "1");
+	bMenuDisable	= ParameterGet("Page", "MenuDisable",  "0");
+	
+END
+
+
+
+/*
+**	FUNCTION NAME:	_PageDefDisplay
+**
+**	This function is called by the event function when a page is
+**	animated. It will display the default animation on all the
+**	pages in the system.
+**      
+**      New templates do not use default animation, the page
+**      enviroment varibable PageCicodeOn is used to flag if the 
+**      cicode is required.
+**
+*/
+
+INT
+FUNCTION
+_PageDefDisplay()
+        IF PageCicodeEnabled() THEN
+        	IF AlarmActive(1) THEN
+	        	DspText(hAnUAlarm, hUnAckFont, "@(Unaccepted Alarm)");
+        	ELSE            
+	        	DspText(hAnUAlarm, hUnAckFont, "");
+        	END
+
+	        IF AlarmActive(5) THEN
+		        DspText(hAnHAlarm, hHwFont, "@(Hardware Alarm)");
+        	ELSE
+	        	DspText(hAnHAlarm, hHwFont, "");
+        	END
+                
+        	IF AlarmActive(3) THEN
+	        	DspText(hAnDAlarm, hUnAckFont, "@(Disabled Alarm)");
+        	ELSE
+	        	DspText(hAnDAlarm, hUnAckFont, "");
+        	END
+
+	        IF DspAnValid(hAnLastAlarm) THEN
+	        	AlarmDspLast(hAnLastAlarm, 1);
+	        END
+
+        	DspText(hAnTime,  hTimeFont,    Time());
+	        DspText(hAnDate,  hTimeFont,    Date(9));
+        	DspText(hAnTitle, hDefaultFont, PageInfo(2));
+	        DspText(hAnName,  hDefaultFont, PageInfo(0));
+        END
+        
+	return 0;
+END
+
+
+
+/*
+**	FUNCTION NAME:  PageSelect
+**
+**	This function creates a form with a combo box containing all the pages
+**	in your database.  From this form you can select and go to any page.
+**
+**	BEGIN
+**		get name of current page to put as default
+**		IF page is included page, ie blank first char THEN
+**			dont display as default
+**		ENDIF
+**		create form with two buttons and combo box
+**		first first rdb
+**		WHILE found rdb DO
+**			IF rdb is a page and not hidden page THEN
+**				add page to combo box
+**			ENDIF 
+**			find next rdb
+**		END WHILE
+**		display the form
+**		IF ok THEN
+**			display the selected page
+**		ENDIF
+**	END
+*/
+
+FUNCTION
+_PageSelect()
+	STRING	sFile;
+	STRING	sBuf;
+	INT	hAn;
+	INT hRdb;
+	INT	nRecord;
+
+	sBuf = PageInfo(0);
+
+	IF StrToChar(sBuf) = StrToChar(" ") THEN
+		sBuf = "";
+	END
+
+	FormNew("@(Page Select)", 62, 2,1);
+	FormButton( 2, 1, "@(OK,20,C)", 0, 1);
+	FormButton(38, 1, "@(Cancel,20,C)", 0, 2);
+	FormComboBox(1, 0, 60, 5, sBuf);
+
+	hRdb = RdbOpen("_PAGES");
+	IF (hRdb <> -1) THEN
+		nRecord = RdbFirstRec(hRdb);
+		WHILE (nRecord <> -1) DO
+			sFile = RdbGet(hRdb, "NAME");
+			
+			IF (StrToChar(sFile) <> StrToChar("!")) AND
+			   (NOT bMenuDisable OR (StrUpper(sFile) <> "PAGEMENU")) THEN
+				FormAddList(sFile);
+			END
+			
+			nRecord = RdbNextRec(hRdb);
+		END
+		RdbClose(hRdb)
+	END
+
+	IF FormRead(0) = 0 THEN
+		PageDisplay(sBuf);
+	END
+END
+
+
+/*
+**	FUNCTION NAME:  _PageMenuEntry
+**
+**	This function creates a page with all page names on buttons. We get
+**	the names of the pages by searching for the *.rdb files in the [RUN]
+**	directory. This function will only display the first 40 pages, if
+**	you want more pages then draw your own menu.
+**
+*/
+
+
+INT
+FUNCTION
+_PageMenuEntry(INT hAnFirst = 24, INT hAnLast = 62)
+	STRING	sFile;
+	INT	hAn;
+	INT hRdb;
+	INT	nRecord;
+	
+	IF bMenuDisable THEN
+		Message("@(This page has been disabled)", "@(Please select another page)", 48);
+		return 0;
+	END
+
+	DspPageButton();
+	hAn = hAnFirst;
+	
+	// Ensure that the font handle is initialized since
+	// this function is called from OnPageEntry event.
+	hButtonFont = DspFontHnd("ButtonFont");
+	
+	hRdb = RdbOpen("_PAGES");
+	IF (hRdb <> -1) THEN
+		nRecord = RdbFirstRec(hRdb);
+		WHILE (nRecord <> -1) AND (hAn <= hAnLast) DO
+			sFile = RdbGet(hRdb, "NAME");
+			
+			IF (StrToChar(sFile) <> StrToChar("!")) AND
+			   (StrUpper(sFile) <> "PAGEMENU") THEN
+				DspButtonFn(hAn, _PageMenuFn, sFile, hButtonFont, 130, 35);
+				hAn = hAn + 1;		
+			END
+			
+			nRecord = RdbNextRec(hRdb);
+		END
+		RdbClose(hRdb)
+	END
+	
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:  _PageMenuFn
+**
+**	This function is called when a menu button is pressed. It gets the
+**	cursor location, which should be on the button. Then gets the text
+**	on the button and displays that page.
+**
+*/
+
+INT
+FUNCTION
+_PageMenuFn()
+	INT	hAn;
+
+	hAn = KeyGetCursor();
+	PageDisplay(DspAnInfo(hAn, 2));	
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:  _PageMenuShutdown
+**
+**	This function is called when the shutdown button is pressed on the
+**	menu page. This function allows the shutdown operation to be disabled
+**	by the parameter [PAGE] MenuShutdown=0.
+**
+*/
+
+FUNCTION
+_PageMenuShutdown()
+
+	IF bMenuShutdown THEN
+		ShutdownForm();
+	ELSE
+		Prompt("@(Shutdown Disabled)");
+	END
+END
+
+
+
+/*
+**	FUNCTION NAME:  DisplayLastAlarm
+**
+**	Display the last alarm.	
+**
+*/
+
+FUNCTION
+DisplayLastAlarm(INT hAn)
+	IF ( PageInfo(7) = "0" ) THEN	
+		IF (hLastAlarmFmt = 0) THEN
+		    	hLastAlarmFmt	= FmtOpen("LastAlarmFmt", ParameterGet("Alarm", "LastAlarmFmt",  "{Tag,32} {Name,32} {Desc,32}"), 1);
+			nLastAlmDspMode	= ParameterGet("Alarm", "LastAlarmDisplayMode", "0");
+		END
+
+		AlarmSetInfo(hAn, 5, hLastAlarmFmt);
+		AlarmSetInfo(hAn, 6, DspFontHnd("Casanova"));
+		AlarmSetInfo(hAn, 8, nLastAlmDspMode);
+	END;
+	AlarmDspLast(hAn);
+END
+
+
+/*
+**	FUNCTION NAME:	TextFileRun
+**
+**	Run from a page to display a text file. 
+**	See DspFile() documentation.
+**
+*/
+
+FUNCTION
+TextFileRun(INT hAn = 21, INT NoLines = 24)
+	IF StrToInt(PageInfo(7)) = 0 THEN
+		DspFile(hAn, DspFontHnd("TextFont"), NoLines, 95);
+	END
+END
+	
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION Name:
+//		PageHistoryDspMenu
+//
+//	SUMMARY:
+//		Displays the page history in a pop up menu. The user can select a page
+//		in the menu, and recall it on the current window.
+//
+//	PARAMS:
+//		type	- type of page history, 0 = all history, 1 = back history, 2 = forward history
+//			
+//	RETURNS: 
+//		0 if run successfully or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION PageHistoryDspMenu(INT type = 0)
+	INT errLevelOld = ErrSetLevel(1);
+	INT offsetStart, offsetBrowse;
+	INT xPos = -1;
+	INT yPos = -1;
+	INT AN;
+	INT direction = 1;	// 1 = list latest first, -1 = list oldest first
+	INT selection;
+	INT retValue;
+	STRING pageTitle;
+
+	// Get cursor position
+	AN = KeyGetCursor();
+	IF (AN > 0) THEN
+		xPos = DspGetAnLeft(AN);
+		yPos = DspGetAnBottom(AN) + 1;
+	END
+
+	SELECT CASE type
+	CASE c_PAGEHISTORY_TYPE_BACK
+		// backward history
+		offsetStart = 1;
+	CASE c_PAGEHISTORY_TYPE_FORWARD
+		// forware history
+		offsetStart = -1;
+		direction = -1;
+	CASE ELSE
+		// list full page history
+		// search the offset of latest forward history from current page
+		offsetStart = 0;
+		WHILE (PagePeekLast(offsetStart - 1) <> "") DO
+			offsetStart = offsetStart - 1;
+		END
+	END SELECT
+
+	// list page history
+	offsetBrowse = offsetStart;
+	WHILE (PagePeekLast(offsetBrowse) <> "") DO
+		pageTitle = PagePeekLast(offsetBrowse, 2);	// active page title is already translated
+		IF (pageTitle = "") THEN
+			// page name is never translated, retrieve value directly
+			pageTitle = PagePeekLast(offsetBrowse, 0);
+		END
+		IF (offsetBrowse = 0) THEN
+			// current page, add check mark
+			DspPopupMenu(0, "~" + pageTitle);
+		ELSE
+			DspPopupMenu(0, pageTitle);
+		END
+		offsetBrowse = offsetBrowse + direction;
+	END
+	selection = DspPopupMenu(-1, "", xPos, yPos);
+	
+	// recall page based on selection
+	IF (selection > 0) THEN
+		offsetBrowse = offsetStart + (selection - 1) * direction;
+		IF (offsetBrowse < 0) THEN
+			retValue = PageForward(-offsetBrowse);
+		ELSE IF (offsetBrowse > 0) THEN
+			retValue = PageBack(offsetBrowse);
+		ELSE
+			retValue = PageRecall(PagePeekCurrent());
+		END END
+	ELSE
+		retValue = 299;
+	END
+
+	ErrSetLevel(errLevelOld);
+	RETURN retValue;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		PageHistoryEmpty
+//
+//	SUMMARY:
+//		Indicates whether page history of the specified type is empty. For all
+//		page history, the function will return the history as empty if only
+//		the currently displayed page is in the page history. 
+//
+//	PARAMS:
+//		type	- type of page history, 0 = all history (default), 1 = back history, 2 = forward history
+//			
+//	RETURNS: 
+//		1 if page history is empty or 0 if it is not empty
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION PageHistoryEmpty(INT type = 0)
+	INT avail;
+	INT errLevelOld = ErrSetLevel(1);
+
+	SELECT CASE type
+	CASE c_PAGEHISTORY_TYPE_BACK
+		avail = (PagePeekLast(1) = "");
+	CASE c_PAGEHISTORY_TYPE_FORWARD
+		avail = (PagePeekLast(-1) = "")
+	CASE ELSE
+		avail = ((PagePeekLast(1) = "") AND (PagePeekLast(-1) = ""));
+	END SELECT
+
+	ErrSetLevel(errLevelOld);
+	RETURN avail;
+END

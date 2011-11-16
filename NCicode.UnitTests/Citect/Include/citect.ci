@@ -1,0 +1,2580 @@
+/*
+**	FILE:	citect.ci
+**
+**	AUTHOR:	Martin Roberts
+**
+**	DATE:	March 1992
+**
+**	REVISION:
+**
+**	1.0	First revision for release 1.0.
+**      3.0     Support for new templates and
+**              for alternative common pages
+**
+**	NOTES:
+**	1. This file contains general cicode functions.
+**
+**      2. New templates do not use cicode to display the
+**      default animations. The page enviroment variable 
+**      PageCicodeOn is used to flag if the cicode is
+**      required. New parameters allow the user to select 
+**      pages for alarms, hardware alarms, disabled alarms
+**      and alarm summary pages.
+**
+*/
+
+
+/*
+**	Local variables for this code.
+*/
+INT	DEFAULT_EXPORT_DISPLAYMODE	= 258; // DISPLAYMODE_STRETCH_RAWSAMPLES BITOR DISPLAYMODE_REVERSE_DATA
+
+INT ERR_DATABROWSE_EOF = 412;
+
+INT	hButtonFont;	/* button font handle	*/
+
+STRING  AlarmPage;      /* file for AlarmPage   */
+STRING  SummaryPage;    /* file SummaryPage     */
+STRING  HardwarePage;   /* file HardwarePage    */
+STRING  DisabledPage;   /* file DisabledPage    */
+
+STRING	sUserName;
+STRING	sFullName;
+STRING	sType;
+STRING	sOldPassword;
+STRING	sPassword;
+STRING	sRetypePassword;
+
+//	List of services in the current process (lower case)
+// 		First dimensional index:
+//			0 = IOServer
+//			1 = Trend
+//			2 = Alarm
+//			3 = Report
+//		Second dimensional index:
+//			0 = Cluster name
+//			1 = Server name
+STRING	m_ServiceArray[4][2];	
+
+/* global for Alarm Logging	*/
+STRING	gsLocalTimeDateFormat = "{Year,4}-{Month,2}-{Day,2} {Hour,2}:{Minute,2}:{Second,2}.{MilliSecond,3}";
+
+INT	hRDB = -1;
+INT	hForm = -1;
+INT	error;
+INT	hUserName;
+INT	hFullName;
+INT	hOldPassword;
+INT	hPassword;
+INT	hRetypePassword;
+INT     nCpuLoadCount;
+INT     nCpuLoadSleepMS;
+
+/*
+**	FUNCTION NAME:	_CitectBegin
+**
+**	This function is called at startup to initialize any ciode
+**	functions. Citect will call this function automaticly.
+**
+*/
+
+FUNCTION
+_CitectBegin()
+
+	INT		iTime;
+	INT		iSplashScreenTime;
+	INT		iInitMultimonitors;
+	INT		iIDC = 0;
+	INT		hFtp = 0;
+	STRING	sRemotePath, sDestPath, sCopyPath;
+	
+	iTime = SysTime();
+	
+	DspVerbose("Initialize Functions");
+
+	hButtonFont = DspFontHnd("ButtonFont");
+	
+	AlarmPage       = ParameterGet("Page", "AlarmPage",     "Alarm");
+	SummaryPage     = ParameterGet("Page", "SummaryPage",	"Summary");
+	HardwarePage    = ParameterGet("Page", "HardwarePage",	"Hardware");
+	DisabledPage    = ParameterGet("Page", "DisabledPage",	"Disabled");
+	gbDebugEnable	= ParameterGet("Code", "DebugMessage",	0);
+	nCpuLoadCount	= StrToInt(ParameterGet("CTAPI", "CpuLoadCount", "100"));
+	nCpuLoadSleepMS	= StrToInt(ParameterGet("CTAPI", "CpuLoadSleepMS", "100"));
+
+	_TrendInit();
+	_SpcInit();
+	_PageDefInit();
+	
+	ErrSet(1);
+	
+	iInitMultiMonitors = ParameterGet("Startup", "InitMultiMonitors", 0); 
+
+	IF iInitMultiMonitors THEN
+
+		iIDC = ParameterGet("INTERNET", "CLIENT", 0);
+		IF (iIDC = 1) THEN
+			hFtp = FtpOpen("", "", "");
+			sRemotePath = "[FTP]:MENU.DBF";
+			sDestPath = "[RUN]:MENU.DBF";
+			FtpFileCopy(hFtp, sRemotePath, sDestPath);
+			sRemotePath = "[FTP]:ALARMGRP.DBF";
+			sDestPath = "[RUN]:ALARMGRP.DBF";			
+			FtpFileCopy(hFtp, sRemotePath, sDestPath);
+			sRemotePath = "[FTP]:TrendGRP.DBF";
+			sDestPath = "[RUN]:TrendGRP.DBF";			
+			FtpFileCopy(hFtp, sRemotePath, sDestPath);
+			FtpClose(hFtp);								
+		ELSE
+			sCopyPath = ParameterGet("CTEDIT", "COPY", "");
+			IF  sCopyPath <> "" THEN
+				//Project uses COPY= path. Copy the user dbfs on startup.
+				IF StrRight(sCopyPath, 1) <> "\" THEN
+					sCopyPath = sCopyPath + "\";
+				END
+				sRemotePath = sCopyPath + "MENU.DBF";
+				sDestPath = "[RUN]:MENU.DBF";
+				FileCopy(sRemotePath, sDestPath, 0)
+				sRemotePath = sCopyPath + "ALARMGRP.DBF";
+				sDestPath = "[RUN]:ALARMGRP.DBF";
+				FileCopy(sRemotePath, sDestPath, 0)
+				sRemotePath = sCopyPath + "TRENDGRP.DBF";
+				sDestPath = "[RUN]:TRENDGRP.DBF";
+				FileCopy(sRemotePath, sDestPath, 0)				
+			END
+		
+		END	
+
+		IF NOT FileExist("[Run]:\Menu.dbf") THEN
+			TaskNew("CSV_MenuConfig_LoadDflt", "", 0);
+		END
+		
+		iSplashScreenTime = ParameterGet("Startup", "SplashScreenTime", 3);
+		IF iSplashScreenTime > 60 THEN
+			iSplashScreenTime = 60;
+		END
+		
+		WHILE (SysTime() - iTime) < (1000*iSplashScreenTime) DO
+		
+			SleepMS(250);
+		END
+		
+		ErrSet(1);
+		! Initialise multimonitor pages
+		TaskNew("CSV_MM_PagesInit","",0);
+		ErrSet(0);
+	END
+
+	! Initialise Tab Style project
+	TaskNew("Tab_Style_Startup","",0);
+
+	! Initialise OEM project
+	TaskNew("_OEM_Startup","",0);
+	
+END
+
+
+/*
+**	FUNCTION NAME:	_CitectPageInit
+**
+**	This function is called at page entry event of the default
+**	!Startup page to initialize the first page.
+**
+**	This function will only be called if the user does not
+**	specify a valid startup page at parameter [Page]Startup
+**
+*/
+
+FUNCTION
+_CitectPageInit(INT splashTime = 4)
+	INT errLevelOld = ErrSetLevel(1);
+
+	Sleep(splashTime);
+
+	IF PageFileInfo("Tab_Style_Startup",0) > 0 THEN
+		PageGoto("Tab_Style_Startup");
+	ELSE
+		PageGoto("PageMenu");
+	END
+	
+	ErrSetLevel(errLevelOld);
+END
+
+
+/*
+**	FUNCTION NAME:	_CitectEnd
+**
+**	This function is called at shutdown to close any cicode
+**	functions data. Citect will call this function automaticly.
+**
+*/
+
+FUNCTION
+_CitectEnd()
+	INT		iInitMultimonitors;
+
+	iInitMultiMonitors = ParameterGet("Startup", "InitMultiMonitors", 0); 
+
+	IF iInitMultiMonitors THEN
+		TaskNew("CSV_WinUtl_LockWindowUpdate", "-1", 0);
+	END
+
+	ErrSet(1);
+	! Shutdown OEM project
+	TaskNew("_OEM_Shutdown","",0);
+	ErrSet(0);
+END
+
+
+/*
+**	FUNCTION NAME:	PageCicodeEnabled
+**
+**	Does this page require the old page Cicode to run
+**      TRUE => yes run the cicode
+**
+*/
+
+INT
+FUNCTION
+PageCicodeEnabled()
+        RETURN DspGetEnv("PageCicodeOn") = "1";
+END
+
+
+/*
+**	FUNCTION NAME:	DspPageButton
+**
+**	This function will display the standard buttons on the bottom of
+**	the normal screen.
+**
+*/
+
+FUNCTION
+DspPageButton()
+        IF PageCicodeEnabled() THEN
+                IF StrToInt(PageInfo(7)) = 0 THEN
+                	DspButtonFn(17, ButtonPageSelect, "@(Select)",  hButtonFont, 70, 20);
+                        DspButtonFn(18, ButtonPageLast, "@(Last Page)", hButtonFont, 70, 20);
+       	                DspButtonFn(19, ButtonPageNext, "@(Page Up)",   hButtonFont, 60, 20);
+               		DspButtonFn(20, ButtonPagePrev, "@(Page Dn)",   hButtonFont, 60, 20);
+               	END
+        END
+END
+
+
+INT
+FUNCTION
+ButtonPageLast()
+
+	PageLast();
+	RETURN 0;
+END
+
+INT
+FUNCTION
+ButtonPageNext()
+
+	PageNext();
+	RETURN 0;
+END
+
+
+INT
+FUNCTION
+ButtonPagePrev()
+
+	PagePrev();
+	RETURN 0;
+END
+
+INT
+FUNCTION
+ButtonPageSelect()
+
+	PageSelect();
+	RETURN 0;
+END
+
+FUNCTION
+PageMenu()
+
+	PageDisplay("PageMenu");
+END
+
+FUNCTION
+_PageFile(string sFile = "")
+
+	IF PageDisplay("File") THEN
+		PageDisplay("!File");
+	END
+	// Only define file attributes if it is not already done
+	IF (DspFileGetInfo(21, 0)  <= 0) THEN
+		DspFile(21, DspFontHnd("TextFont"), 24, 95);
+	END
+	DspFileSetName(21, sFile);
+END
+
+
+FUNCTION
+PageRichTextFile(INT hAn,STRING sFilename, INT nMode = 0, INT nHeight = 0, INT nWidth = 0)
+	INT x1;
+	INT x2;
+	INT y1;
+	INT y2;
+	IF ((nHeight = 0) OR (nWidth = 0)) THEN
+		DspAnGetPos(hAn,x1,y1);
+		DspAnGetPos((hAn + 1),x2,y2);
+		DspRichText(hAn,abs(y2 - y1),abs(x2 - x1), nMode);
+	ELSE
+		DspRichText(hAn,nHeight,nWidth,nMode);
+	END
+	DspRichTextLoad(hAn,sFileName);
+END
+
+
+STRING
+FUNCTION
+sConfigErrMsg(STRING sPage,STRING sTemplate = "")
+
+	STRING sMsg;
+
+	IF sTemplate = "" THEN
+		sTemplate = sPage;
+	END 
+
+	sMsg = "Please ensure you have configured a page called '" + sPage + "' in^n" +
+	"your project using the Graphics Builder. If not, please do so. ^n^n" +
+	"You will need to configure the page using the '" + sTemplate + "' template.";
+	
+	return sMsg;
+END
+
+FUNCTION
+_PageAlarm(INT category = 0)
+	INT	ret=0;
+
+	ret = PageDisplay(AlarmPage);
+	SELECT CASE (ret)
+		CASE 0
+	       		AlarmSetInfo(21, 2, category);
+		CASE 267, 277
+			; // out of user area, or insufficient priv (message shown by PageDisplay)
+		CASE ELSE
+			Message("Configuration Error", sConfigErrMsg("Alarm"), 0);	// ret = 261 if page does not exist.
+	END SELECT 	
+END
+
+
+FUNCTION
+_PageSummary(INT category = 0)
+	INT	ret=0;
+
+	ret = PageDisplay(SummaryPage);
+	SELECT CASE (ret)
+		CASE 0
+	       		AlarmSetInfo(21, 2, category);
+		CASE 267, 277
+			; // out of user area, or insufficient priv (message shown by PageDisplay)
+		CASE ELSE
+			Message("Configuration Error", sConfigErrMsg("Summary"), 0);	// ret = 261 if page does not exist.
+	END SELECT
+END
+
+
+FUNCTION
+_PageHardware()
+	INT	ret=0;
+
+	ret = PageDisplay(HardwarePage);
+	SELECT CASE (ret)
+		CASE 0
+			; // sucess
+		CASE 267, 277
+			; // out of user area, or insufficient priv (message shown by PageDisplay)
+		CASE ELSE
+			Message("Configuration Error", sConfigErrMsg("Hardware"), 0);	// ret = 261 if page does not exist.
+	END SELECT
+END
+
+
+FUNCTION
+_PageDisabled(INT category = 0)
+	INT	ret=0;
+
+	ret = PageDisplay(DisabledPage);
+	SELECT CASE (ret)
+		CASE 0
+     		AlarmSetInfo(21, 2, category);
+		CASE 267, 277
+			; // out of user area, or insufficient priv (message shown by PageDisplay)
+		CASE ELSE
+			Message("Configuration Error", sConfigErrMsg("Disabled"), 0); // ret = 261 if page does not exist.
+	END SELECT
+END
+
+
+/* if user functions then must have () in call ? */
+
+STRING
+FUNCTION
+Time(INT format=0)
+
+	return TimeToStr(TimeCurrent(), format);
+END
+
+STRING
+FUNCTION
+Date(INT format=2)
+
+	return TimeToStr(TimeCurrent(), format);
+END
+
+/*
+**	FUNCTION NAME:	DateYears
+**
+**	This function returns the year from a date passed to it.
+**	mode 0 returns year as yy (e.g. for 1995 returns 95)
+**	mode 1 returns year as yyyy (e.g. for 1995 returns 1995)
+**
+*/
+
+INT
+FUNCTION
+DateYear(INT time, INT mode=0)
+
+	INT format;
+
+	IF mode = 0 THEN
+		format = 6;
+	ELSE
+		format = 9;
+	END
+
+	return _TimeSub(time, format);
+END
+
+/*
+**	FUNCTION NAME:	LoginForm
+**
+**	This function displays the login form, get the user name and
+**	password then trys to log the user in. If the login fails it
+**	will retry until login is ok or user presses the cancel button.
+**
+*/
+
+INT
+FUNCTION
+LoginForm(STRING sName="", STRING sPassword="")
+	INT	bDone;
+	INT	nStatus;
+	INT	hForm;
+
+	bDone = FALSE;
+	WHILE bDone = FALSE DO
+		FormNew("@(Login Form)", 35, 5, 5);
+		FormPrompt(1, 0, "@(Name)");
+		FormInput(16, 0, "", sName, 16);
+		FormPrompt(1, 2, "@(Password)");
+		FormSecurePassword(18, 2, "", sPassword, 16);
+		FormButton( 6, 4, "  " + "@(OK)" + "  ", 0, 1);
+		FormButton(20, 4, "@(Cancel)", 0, 2);
+
+		IF FormRead(0) = 0 THEN
+			
+			hForm = FormNew("@(User Login)", 36, 1, 8 + 16 + 128 + 256);
+			FormPrompt(1, 0, "@(Authentication in progress ...)");
+			FormRead(1);
+			SleepMs(200);
+
+			IF UserLogin(sName, sPassword) = 0 THEN
+				bDone = TRUE;
+				nStatus = 0;
+			ELSE
+				sPassword = "";
+			END
+
+			IF FormActive(hForm) THEN
+				FormDestroy(hForm);
+			END
+		ELSE
+			bDone = TRUE;
+			nStatus = 298;
+		END
+	END
+	RETURN nStatus;
+END
+
+
+
+/*
+**	FUNCTION NAME:	ShutdownForm
+**
+**	This function displays the shutdown form, get checks if the
+**	user realy wants to shutdown. If user says ok then it shutdown
+**	the citect system.
+**
+*/
+
+INT
+FUNCTION
+ShutdownForm()
+	INT	nStatus;
+
+	FormNew("@(Are you sure ?)", 26, 2, 5);
+	FormButton( 1, 0, " " + "@(Yes)" + " ", 0, 1);
+	FormButton(15, 0, " " + "@(No)" + "  ", 0, 2);
+
+	IF FormRead(0) = 0 THEN
+		Shutdown("","",1);
+		nStatus = 0;
+	ELSE
+		nStatus = 298;
+	END
+
+	RETURN nStatus;
+END
+
+
+
+/*
+**	FUNCTION NAME:	KeyFlush
+**
+**	This function Flushes the keyboard buffer.
+**
+*/
+
+FUNCTION
+KeyFlush()
+
+	WHILE KeyGet() <> 0 DO
+		;
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	DspAnValid
+**
+**	Check if the given animation number is valid. Return TRUE if
+**	valid else FALSE. The an is not configured if the x position
+**	is set to -1.
+**
+*/
+
+INT
+FUNCTION
+DspAnValid(INT hAn)
+	INT	x, y;
+
+	IF hAn = 0 THEN
+		RETURN FALSE;
+	END
+	IF DspAnGetPos(hAn, x, y) THEN
+		RETURN FALSE;
+	END
+	IF x = -1 THEN
+		RETURN FALSE;
+	ELSE
+		RETURN TRUE;
+	END
+END
+
+
+
+/*
+**	FUNCTION NAME:	LogoutIdle
+**
+**	Set the operator logout idle time. After the idle time if the
+**	operator has done nothing the the user is logged out. The idle
+**	time is in minutes. To stop the current logout, call this function
+**	with a -ve idle time.
+**
+*/
+
+INT	hLogoutTask = -1;
+
+FUNCTION
+LogoutIdle(INT idle)
+
+
+	IF hLogoutTask > 0 THEN
+		TaskKill(hLogoutTask);
+		hLogoutTask = -1;
+	END
+
+	IF idle > 0 THEN
+		hLogoutTask = TaskNew("_WaitIdle", idle, 0);
+	END
+END
+
+
+
+/*
+**	FUNCTION NAME:	_WaitIdle
+**
+**	Check if the current user has been idle for the given amount
+**	of time (minutes). If idle then display prompt to allow user
+**	to cancel and wait 5 seconds. If user does not cancel prompt
+**	then log the user out.
+**
+**	Don't call this function directly, this function is created
+**	as a task from FUNCTION LogoutIdle.
+**
+*/
+
+FUNCTION
+_WaitIdle(INT idle)
+	INT	hForm;
+	INT	lastCommand;
+	INT	lastActivity;
+	INT	x,y,an;
+	INT	newx,newy,newan;
+
+	idle = idle * 60;
+	
+	WHILE TRUE DO
+		IF UserInfo(6) = "1" THEN
+			lastCommand = UserInfo(4);
+			IF (lastActivity < lastCommand) THEN
+				lastActivity = lastCommand;
+			END
+			
+			DspGetMouse(newx, newy);
+			newAn = KeyGetCursor();
+			IF NOT (newx = x AND newy = Y AND newAn = an) THEN
+				lastActivity = TimeCurrent();
+			END;
+
+			IF TimeCurrent() - lastActivity >= idle THEN						
+				hForm = FormNew("@(Logout)", 30, 4, 4);
+				FormPrompt(0, 0, "@(Logout idle time exceeded)");
+				FormPrompt(5, 1, "@(OK to Logout)");
+				FormButton(10, 3, "@(Cancel)", 0, 2);
+				FormRead(1);
+				Sleep(5);
+				IF FormActive(hForm) THEN
+					FormDestroy(hForm);
+					Logout();
+				END;
+			END;
+			DspGetMouse(x, y);
+			an = KeyGetCursor();
+		END;
+		Sleep(1);
+	END;
+END
+
+
+
+/*
+**	FUNCTION NAME: SerialKey
+**
+**	This function will initialize a serial keyboard. Once the
+**	serial keyboard is open citect will read characters from
+**	the serial keyboard and put them into the keyboard buffer
+**	for normal keyboard processing.
+**
+**	To open the keyboard you must have a port defined in the
+**	ports database and also a board defined. See protocol
+**	manual on how to setup boards and ports. You must also
+**	either enable the IOServer or just set the name of the
+**	IOServer to the name configured in the board and ports
+**	database.
+*/
+
+FUNCTION
+SerialKey(STRING sPort)
+	INT	hPort;
+
+	hPort = ComOpen(sPort, 0);
+	IF hPort >= 0 THEN
+		TaskNew("_SerKeyTask", hPort, 0);
+	ELSE
+		Prompt("Cannot Open Serial Keyboard " + sPort);
+	END
+END
+
+
+/*
+**	FUNCTION NAME: SerKeyTask
+**
+**	This task will read characters from a serial port and put
+**	them into the keyboard. This will allow using a serial
+**	keyboard. As this is a task you should not call this
+**	function directory, but via the above function 'SerialKey'.
+**
+*/
+
+FUNCTION
+_SerKeyTask(INT hPort)
+	STRING	buf;
+	INT	len;
+	INT	i;
+	
+	WHILE 1 DO
+		len = 255;
+		ComRead(hPort, buf, len, -1);
+		FOR i = 0 TO len DO
+			KeyPut(StrGetChar(buf, i));
+		END
+	END
+END
+
+
+/*
+**	FUNCTION NAME: PagePopUp
+**
+**	Display pop up window at the mouse position. If cannot get the
+**	mouse position then display in the center of the screen.
+**	The windows is displayed with no resize and will be closed if
+**	the page is changed.
+**
+*/
+
+FUNCTION
+PagePopUp(STRING sPage, STRING sCluster = "")
+	INT	x, y;
+	REAL	ScaleX, ScaleY;
+	
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+	WinNewAt(sPage, x, y, 1 + 4 + 256, sCluster);
+END
+
+
+
+/*
+**	FUNCTION NAME: FilePrint
+**
+**	Print a file to a device, typically a printer.   It acts more like
+**	a filecopy, as it does not distinguish text-files from dbf-files, etc.
+**	
+*/
+
+
+INT
+FUNCTION
+FilePrint(STRING sDeviceName, STRING sFileName)
+	
+	INT	hFile;
+	INT	hDev;
+	INT	strLen;
+	STRING	str1;
+	
+	hDev = DevOpen(sDeviceName, 0);
+	IF (hDev = -1) THEN
+		ErrLog("Invalid arg to FilePrint - 'DeviceName'");
+		RETURN 261;	/* File does not exist */
+	END
+
+	hFile = FileOpen(sFileName, "r");
+	IF (hFile = -1) THEN
+		ErrLog("Invalid arg to FilePrint - 'FileName'");
+		DevClose(hDev);
+		RETURN 261;	/* File does not exist */
+	END
+
+        WHILE NOT FileEof(hFile) DO
+	        str1 = FileReadLn(hFile);
+	        DevWriteLn(hDev, Str1);
+        END
+
+	FileClose(hFile);
+	DevClose(hDev);
+	RETURN  0;
+END
+		
+/*
+**	FUNCTION NAME: AlarmEventQue
+**
+**	Open the alarm event queue. The alarm server will put alarm events into
+**	this queue. This queue must be enabled with the [ALARM]EventQue=1
+**	parameter. You may only call this function on the alarm server.
+**	
+*/
+
+INT
+FUNCTION
+AlarmEventQue()
+
+	RETURN QueOpen("EventQue", 0);
+END	
+
+
+/*
+**	FUNCTION NAME: HwAlarmQue
+**
+**	Return the handle of the local Hardware Alarm Que.
+**	Returns -1 if the queue is not in operation
+**	(The queue is enabled only if its length has been specified).
+**	
+*/
+
+INT
+FUNCTION
+HwAlarmQue()
+
+	RETURN QueOpen("HardwareAlarmQue", 0);
+END	
+
+/*
+**	FUNCTION NAME: TagWriteEventQue
+**
+**	Open the tag write event queue. Citect will put tag events (timestamp, tag name, 
+**	and new value) into this queue. This queue must be enabled with the 
+**	[GENERAL]TagWriteEventQue=1 parameter and Log Write in the I/O Devices form in Citect 
+**	to be True. You can call this function on the server and the client machine.
+**
+*/
+
+INT
+FUNCTION
+TagWriteEventQue()
+
+	RETURN QueOpen("TagWriteEventQue", 0);
+END
+
+/*
+**	FUNCTION NAME: UserCreateForm
+**
+**	Opens a form to create online users.
+*/
+
+INT
+FUNCTION
+UserCreateForm()
+
+	STRING sDummyBuffer;
+	STRING sAddType;
+	INT nError;
+
+ 	IF (hForm <> -1) THEN
+ 		RETURN 0;
+ 	END
+
+	sUserName = "";
+	sFullName = "";
+	sType = "";
+	sPassword = "";
+	sRetypePassword = "";
+
+	FormNew("@(Create User)", 44, 6, 8);
+	FormPrompt(0, 0, "@(User Name)");
+	FormField(28, 0, 16, 1, 1, sUserName, "", 0, 16);
+	FormPrompt(0, 1, "@(Full Name)");
+	FormField(28, 1, 16, 1, 1, sFullName, "", 0, 32);
+	FormPrompt(0, 2, "@(Type)");
+	FormComboBox(28, 2, 16, 5, sType);
+
+	hRDB = RDBOpen("_Users");
+	IF (hRDB <> -1) THEN
+		error = RDBFirstRec(hRDB);
+		WHILE (error <> -1) DO
+			sAddType = RDBGet(hRDB, "TYPE");
+			IF (StrTrim(sAddType) <> "") THEN
+				FormAddList(sAddType);
+			END
+			error = RDBNextRec(hRDB);
+		END
+		RDBClose(hRDB);
+		hRDB = -1;
+	END
+
+	FormPrompt(0, 3, "@(Enter Password)");
+	FormPassword(28, 3, "", sPassword, 16);
+	FormPrompt(0, 4, "@(Retype Password)");
+	FormPassword(28, 4, "", sRetypePassword, 16);
+
+	FormField(4, 5, 11, 1, 5, sDummyBuffer, "@(OK)", 0);
+	FormField(28, 5, 11, 1, 6, sDummyBuffer, "@(Cancel)", 0);
+
+	IF (FormRead(0) = 0) THEN
+
+		IF (sPassword = sRetypePassword) THEN
+			nError = UserCreate(sUserName,sFullName,sPassword,sType);
+			IF nError <> 0 THEN
+				Message("Citect","@(Create user failed)",16);
+			END
+			RETURN nError;
+		ELSE
+			Message("Citect","@(Passwords did not match)",48);
+			RETURN 299;
+		END
+	ELSE
+		RETURN 299;
+	END
+
+END
+
+/*
+**	FUNCTION NAME: UserEditForm
+**
+**	Opens a form to edit online users.
+*/
+
+INT
+FUNCTION
+_SetFields()
+
+	IF (hRDB <> -1) AND (hForm <> -1) THEN
+		sUserName = RDBGet(hRDB,"NAME");
+		sFullName = RDBGet(hRDB,"FULL_NAME");
+
+		FormSetData(hForm);
+	END
+
+	RETURN 0;
+END
+
+
+INT
+FUNCTION
+_UserPrev()
+
+	INT RecordNo;
+
+	IF hRDB <> -1 THEN
+		RecordNo = RDBPrevRec(hRDB);
+		IF RecordNo = -1 THEN
+			RecordNo = RDBFirstRec(hRDB);
+		END
+
+		IF RecordNo <> -1 THEN
+			_SetFields();
+		END
+	END
+	
+	RETURN 0;
+END
+
+INT
+FUNCTION
+_UserNext()
+
+	INT RecordNo;
+
+	IF hRDB <> -1 THEN
+		RecordNo = RDBNextRec(hRDB);
+		IF RecordNo = -1 THEN
+			RecordNo = RDBLastRec(hRDB);
+		END
+
+		IF RecordNo <> -1 THEN
+			_SetFields();
+		END
+	END
+
+	RETURN 0;
+END
+
+
+INT
+FUNCTION
+_UserChangePassword()
+
+	error = 0;
+
+	IF (hForm <> -1) THEN
+		FormGetData(hForm);
+
+		IF (sPassword <> sRetypePassword) THEN
+			Message("@(Error)","@(Passwords do not match)",0);
+		ELSE
+			error = UserPassword(sUserName,sPassword,sOldPassword);
+
+			IF error <> 0 THEN
+				Message("@(Change Password)", "@(Change user password failed)", 0);
+			END
+		END
+	END
+
+        RETURN 0;
+END
+
+INT
+FUNCTION
+_UserDelete()
+
+	error = 0;
+
+	IF (hForm <> -1) THEN
+		FormGetData(hForm);
+		error = UserDelete(sUserName);
+	END
+
+        RETURN error;
+END
+
+INT
+FUNCTION
+UserEditForm()
+
+	STRING sDummyBuffer;
+
+ 	IF (hForm <> -1) THEN
+ 		RETURN 0;
+ 	END
+
+	hRDB = RDBOpen("_Users");
+	RDBFirstRec(hRDB);
+	sUserName = RDBGet(hRDB,"NAME");
+	sFullName = RDBGet(hRDB,"FULL_NAME");
+	sOldPassword = "";
+	sPassword = "";
+	sRetypePassword = "";
+	error = 0;
+
+	hForm = FormNew("@(Edit User)", 53, 8, 8);
+
+	FormPrompt(0, 0, "@(User Name)");
+	hUserName = FormField(33, 0, 20, 1, 1, sUserName, "", 0);
+	FormPrompt(0, 1, "@(Full Name)");
+	hFullName = FormField(33, 1, 20, 1, 1, sFullName, "", 0);
+	FormPrompt(0, 2, "@(Enter Old Password)");
+	hOldPassword = FormPassword(33, 2, "", sOldPassword, 20);
+	FormPrompt(0, 3, "@(Enter New Password)");
+	hPassword = FormPassword(33, 3, "", sPassword, 20);
+	FormPrompt(0, 4, "@(Retype New Password)");
+	hRetypePassword = FormPassword(33, 4, "", sRetypePassword, 20);
+
+	FormField(10, 5, 11, 1, 4, sDummyBuffer, "@(Prev)", _UserPrev);
+	FormField(28, 5, 11, 1, 4, sDummyBuffer, "@(Next)", _UserNext);
+	FormButton(10, 6, "      " + "@(Change Password)" + "       ", _UserChangePassword, 1);
+	FormButton(10, 7, "  " + "@(Delete)" + "  ", _UserDelete, 1);
+	FormField(28, 7, 11, 1, 6, sDummyBuffer, "@(Cancel)", 0);
+
+	IF (FormRead(0) = 0) THEN
+		RDBClose(hRDB);			
+
+		hRDB = -1;
+		hForm = -1;
+
+		RETURN error;
+	ELSE
+		RDBClose(hRDB);			
+
+		hRDB = -1;
+		hForm = -1;
+
+		RETURN 299;
+	END
+
+END
+
+
+/*
+**	FUNCTION:	UserPasswordForm()
+**		
+**	Display a form to allow users to change their own passwords.
+**	Changes are written to both the Users database and the runtime 
+**	database in memory.
+**
+**	Returns	0 (zero) if successful, otherwise an error is returned.  
+*/
+
+INT
+FUNCTION
+UserPasswordForm()
+
+	sOldPassword = "";
+	sPassword = "";
+	sRetypePassword = "";
+	error = 0;
+	
+ 	IF (hForm <> -1) THEN
+ 		RETURN 0;
+ 	END
+
+	sFullName = FullName();
+	sUserName = Name();
+
+	hRDB = RDBOpen("_Users");
+	IF hRDB <> -1 THEN
+	
+		RDBFirstRec(hRDB);
+		WHILE sFullName <> RDBGet(hRDB,"FULL_NAME") OR 
+                      sUserName <>RDBGet(hRDB,"NAME")	DO
+			IF RDBNextRec(hRDB) = -1 THEN
+				RDBClose(hRDB);			
+				hRDB = -1;
+				RETURN 276;
+			END
+		END
+
+		RDBClose(hRDB);			
+		hRDB = -1;
+	
+		hForm = FormNew("@(Change Password)", 46, 7, 8);
+
+		FormPrompt(1, 0, "@(User Name)");
+		FormPrompt(29, 0, sUserName);
+		FormPrompt(1, 1, "@(Full Name)");
+		FormPrompt(29, 1, sFullName);
+
+		FormPrompt(1, 2, "@(Enter Old Password)");
+		FormPassword(29, 2, "", sOldPassword, 16);
+		FormPrompt(1, 3, "@(Enter New Password)");
+		FormPassword(29, 3, "", sPassword, 16);
+		FormPrompt(1, 4, "@(Retype New Password)");
+		FormPassword(29, 4, "", sRetypePassword, 16);
+
+		FormButton(8, 6, "   " + "@(OK)" + "   ", 0, 1);
+		FormButton(26, 6, " " + "@(Cancel)" + " ", 0, 2);
+
+		IF FormRead(0) = 0 THEN
+			_UserChangePassword();
+			IF error <> 0 THEN
+				ErrLog("Illegal attempt to change password by " + sFullName);
+			END
+			hForm = -1;
+			RETURN error;
+		END
+	END
+
+	hForm = -1;
+	
+	RETURN 299;
+
+END
+
+
+/*
+**	FUNCTION:	EnterCriticalSection()
+**		
+**	Enter a named critical section.	Only a single thread
+**	can enter the critical section at the same time.
+**
+**	Returns	0 (zero) if successful, otherwise an error is returned.  
+*/
+
+INT
+FUNCTION
+EnterCriticalSection(STRING sName)
+	INT	hSem;
+
+	hSem = SemOpen(sName, 2);
+	return SemWait(hSem, -1);
+END
+
+
+/*
+**	FUNCTION:	LeaveCriticalSection()
+**		
+**	Leave a named critical section. This allows other
+**	threads to enter the critical section.
+**
+*/
+
+FUNCTION
+LeaveCriticalSection(STRING sName)
+	INT	hSem;
+
+	hSem = SemOpen(sName, 0);
+	IF hSem >= 0 THEN
+		SemSignal(hSem);
+	END
+END
+
+
+/*
+**	FUNCTION:	GetQueryDevName
+**		
+**	Return a query device name for CTAPI query functions.
+**	They can be Query0, Query1, ..., depend on which query device is available.
+**
+**	CTAPI query function needs query device be defined in Citect project to output
+**	its data. The multiple query device can be defined and must be named as Query0,
+**	Query1, Query2, .... This allows multiple queries to operate in parallel.
+**
+**	The value of the variable nMaxQueries must match the number of the query devices
+**	defined in Citect project.
+*/
+
+INT	nMaxQueries = 3;
+INT	counter;
+
+STRING
+FUNCTION
+GetQueryDevName()
+	STRING	sName;
+	INT	nCurrCounter;
+	INT	iKeepGoing = 1;
+	INT	hSem;
+
+	EnterCriticalSection("ProtectCounter");
+	nCurrCounter = counter
+
+	// Find available query device, if all used then
+	// just pick up the current one.
+	WHILE iKeepGoing = 1 DO
+		sName = "Query" + counter : #;
+		counter = counter + 1;
+		IF counter >= nMaxQueries THEN
+			counter = 0;
+		END
+
+		hSem = SemOpen(sName, 0);
+		IF hSem >= 0 THEN
+			IF SemWait(hSem, 0) = 0 THEN
+				iKeepGoing = 0;
+				SemSignal(hSem);
+			ELSE
+				IF counter = nCurrCounter THEN	// this ensure the loop will just go for one cycle
+					sName = "Query" + counter : #;
+					counter = counter + 1;
+					IF counter >= nMaxQueries THEN
+						counter = 0;
+					END
+					iKeepGoing = 0;
+				END
+			END
+		ELSE
+			iKeepGoing = 0;
+		END
+	END
+	LeaveCriticalSection("ProtectCounter");
+
+	RETURN sName;
+END
+
+
+/*
+**	FUNCTION:	_CTAPIReduceCPULoad()
+**		
+**	This function count down the number of times the caller call
+**	this function and increase the counter nCTAPI_CpuLoadCount.
+**	When the counter exceed the cpu load limit, the caller will
+**	be put into sleep, and the counter will be reset to zero.
+*/
+
+INT	nCTAPI_CpuLoadCount;
+INT	nCTAPI_CpuLoadTime;
+
+FUNCTION
+_CTAPIReduceCPULoad()
+
+	INT	nCurrTime;
+
+	EnterCriticalSection("CTAPI_CPU_Load");
+	nCurrTime = TimeCurrent();
+	IF (nCurrTime - nCTAPI_CpuLoadTime) > 3 THEN
+		nCTAPI_CPULoadCount = 0;
+	END
+	IF nCTAPI_CPULoadCount >= nCpuLoadCount THEN
+		nCTAPI_CPULoadCount = 0;
+		SleepMS(nCpuLoadSleepMS);
+	ELSE
+		nCTAPI_CPULoadCount = nCTAPI_CPULoadCount + 1;
+	END
+	nCTAPI_CpuLoadTime = TimeCurrent();
+	LeaveCriticalSection("CTAPI_CPU_Load");
+END
+
+
+/*
+**	FUNCTION:	CTAPITrend
+**		
+**	The CTAPI Trend handler. This function is called via the CTAPI interface
+**	to process historical trend queries and send them back via CTAPI.
+**
+**	All the magic happens with the CTAPIPost() function. This sends the result
+**	of the query back to CTAPI which will then continue the execution of the
+**	query.
+*/
+
+INT
+FUNCTION
+CTAPITrend(STRING sTime, STRING sDate, REAL nPeriod, INT nLength, INT nMode,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+
+	STRING	sName;
+	STRING	sFmt;
+	INT	hDev;
+	INT	nTime;
+	INT	nError;
+
+	ErrSet(1);
+	sName = GetQueryDevName();
+
+	EnterCriticalSection(sName);
+
+	IF StrLength(sTime) = 0 THEN
+		nTime = TimeCurrent();
+	ELSE
+		nTime = StrToTime(sTime) + StrToDate(sDate);
+	END
+
+	IF nPeriod = 0.0 THEN
+		nPeriod = TrnInfo(sTag1, 2);
+	END
+
+	nError = _TrnExport(sName, nTime, nPeriod, nLength, nMode, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8,
+			nDisplayMode1, nDisplayMode2, nDisplayMode3, nDisplayMode4,
+			nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+
+	CAPIPost(sName, nError);
+
+	LeaveCriticalSection(sName);
+
+	ErrSet(0);
+	RETURN 0;
+END
+
+/*
+**	FUNCTION:	CTAPIAlarm
+**		
+**	The CTAPI Alarm handler. This function is called via the CTAPI interface
+**	to process alarms queries and send them back via CTAPI.
+**
+**	This function can be called on both alarm server or client.
+**
+*/
+
+INT	ANALOG_ALARM = 1;
+INT	ARGDIG_ALARM = 3;
+INT	ARGANA_ALARM = 4;
+INT	HRES_ALARM   = 6;		/* high resolution / timestamped	*/
+
+INT
+FUNCTION
+CTAPIAlarm(INT nCat, INT nType, INT nArea)
+	INT record;
+	STRING	sName;
+	STRING	sFileName;
+	INT	hDev;
+	STRING	sCluster;
+	STRING	sTag;
+
+	ErrSet(1);
+	sName = GetQueryDevName();
+
+	EnterCriticalSection(sName);
+	sFileName = "[data]:" + sName + ".dbf";
+
+	IF FileExist(sFileName) THEN
+		FileDelete(sFileName);
+	END
+
+	DevModify(sName, "{TIME,12}{DATE,12}{CLUSTER,16}{TAG,79}{NAME,32}{DESC,79}{CATEGORY,4}{RECNO,10}{ONTIME, 12}{OFFTIME, 12}{ONDATE, 12}{OFFDATE, 12}{ACKDATE, 12}{ACKTIME, 12}{COMMENT, 48}{SUMSTATE, 16}{STATE, 16}{STATE_DESC,16}{TYPE, 4}{MILLISEC,6}{ONMILLI,6}{OFFMILLI,6}", "", sFileName, dBASE_DEV);
+
+	IF nType > -1 THEN
+		hDev = DevOpen(sName, 0);
+		sCluster = ClusterFirst();
+		WHILE sCluster <> "" DO
+			record = AlarmFirstCatRec(nCat, nType, nArea, sCluster);
+			WHILE (record <> -1) AND NOT (TaskGetSignal(TaskHnd()) BITAND 0x0001) DO
+				sTag = StrTrim(AlarmGetFieldRec(record, "TAG", 0, sCluster));
+				IF StrLength(sTag) > 0 THEN
+					DevAppend(hDev);
+					DevSetField(hDev, "TIME", AlarmGetFieldRec(record, "TIME", 0, sCluster));
+					DevSetField(hDev, "DATE", AlarmGetFieldRec(record, "DATE", 0, sCluster));
+					DevSetField(hDev, "CLUSTER", sCluster);
+					DevSetField(hDev, "TAG", sTag);
+					DevSetField(hDev, "NAME", AlarmGetFieldRec(record, "NAME", 0, sCluster));
+					IF ((record BITAND 0x0000FFFF) = ANALOG_ALARM) OR ((record BITAND 0x0000FFFF) = ARGANA_ALARM) THEN
+						DevSetField(hDev, "DESC", "");	// no description for analog alarm
+					ELSE
+						DevSetField(hDev, "DESC", AlarmGetFieldRec(record, "DESC", 0, sCluster));
+					END
+					IF ((record BITAND 0x0000FFFF) = ARGDIG_ALARM) THEN
+						DevSetField(hDev, "STATE_DESC", AlarmGetFieldRec(record, "STATE_DESC", 0, sCluster));
+					ELSE
+						DevSetField(hDev, "STATE_DESC", "");	// no state description for others
+					END
+					DevSetField(hDev, "CATEGORY", AlarmGetFieldRec(record, "CATEGORY", 0, sCluster));
+					DevSetField(hDev, "RECNO", record);
+					DevSetField(hDev, "ONTIME", AlarmGetFieldRec(record, "ONTIME", 0, sCluster));
+					DevSetField(hDev, "OFFTIME", AlarmGetFieldRec(record, "OFFTIME", 0, sCluster));
+					DevSetField(hDev, "ONDATE", AlarmGetFieldRec(record, "ONDATE", 0, sCluster));
+					DevSetField(hDev, "OFFDATE", AlarmGetFieldRec(record, "OFFDATE", 0, sCluster));
+					DevSetField(hDev, "ACKDATE", AlarmGetFieldRec(record, "ACKDATE", 0, sCluster));
+					DevSetField(hDev, "ACKTIME", AlarmGetFieldRec(record, "ACKTIME", 0, sCluster));
+					DevSetField(hDev, "COMMENT", AlarmGetFieldRec(record, "COMMENT", 0, sCluster));
+					DevSetField(hDev, "SUMSTATE", AlarmGetFieldRec(record, "SUMSTATE", 0, sCluster));
+					DevSetField(hDev, "STATE", AlarmGetFieldRec(record, "STATE", 0, sCluster));
+					DevSetField(hDev, "TYPE", (record BITAND 0x0000FFFF));
+					DevSetField(hDev, "MILLISEC", AlarmGetFieldRec(record, "MILLISEC", 0, sCluster));
+					DevSetField(hDev, "ONMILLI", AlarmGetFieldRec(record, "ONMILLI", 0, sCluster));
+					DevSetField(hDev, "OFFMILLI", AlarmGetFieldRec(record, "OFFMILLI", 0, sCluster));
+				END
+	
+				record = AlarmNextCatRec(record, nCat, nType, nArea, sCluster);
+	
+				// Reduce CPU load
+				IF record <> -1 THEN
+					_CTAPIReduceCPULoad();
+				END
+			END
+			
+			sCluster = ClusterNext(sCluster);
+		END
+
+		DevClose(hDev);
+	END
+
+	CAPIPost(sName, IsError());
+
+	LeaveCriticalSection(sName);
+	ErrSet(0);
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION:	CTAPIAlarmSummary
+**		
+**	The CTAPI Alarm Summary handler. This function is called via the CTAPI interface
+**	to process alarms queries and send them back via CTAPI.
+**
+**	This function can be called on both alarm server or client.
+**
+*/
+
+INT
+FUNCTION
+CTAPIAlarmSummary(STRING sStartDate, STRING sStartTime, STRING sEndDate, STRING sEndTime, INT nCategory, INT nNumAlarms, STRING sTag = "", INT bIncludeOffAndAck = 0)
+	INT	hBrowse;
+	INT	status;
+	STRING	sName;
+	STRING	sFileName;
+	INT	hDev;
+	INT	nStartTime = 0;
+	INT	nEndTime;
+	STRING	sRecOnDate;
+	STRING	sRecOnTime;
+	STRING	sRecOffDate;
+	STRING	sRecOffTime;
+	STRING	sRecAckDate;
+	STRING	sRecAckTime;
+	INT	nRecDateTime = 0;
+	INT	nRecOffDateTime = 0;
+	INT	nRecAckDateTime = 0;
+	INT	nRecMatch = 0;
+	STRING	sRecCategory;
+	INT	nRecCategory;
+	INT	nNumRecordsFound = 0;
+	INT	nTimeCompareRequired = 0;
+	INT	nRecTimeMatch = 1;
+	STRING	sRecCluster;
+	STRING	sRecTag;
+	STRING	sRecTagEx;
+	INT	nAlarmType;
+
+	ErrSet(1);
+	sName = GetQueryDevName();
+
+	EnterCriticalSection(sName);
+	sFileName = "[data]:" + sName + ".dbf";
+
+	IF StrLength(sStartTime) <> 0 THEN
+		nStartTime = StrToTime(sStartTime) + StrToDate(sStartDate);
+		nTimeCompareRequired = 1;
+	END
+
+	IF StrLength(sEndTime) <> 0 THEN
+		nEndTime = StrToTime(sEndTime) + StrToDate(sEndDate);
+		nTimeCompareRequired = 1;
+	ELSE
+		nEndTime = StrToDate("1/1/2037");
+	END
+
+	IF nNumAlarms = -1 THEN
+		nNumAlarms = 999999999;
+	END
+
+	IF FileExist(sFileName) THEN
+		FileDelete(sFileName);
+	END
+
+	DevModify(sName, "{CLUSTER,16}{TAG,79}{NAME,32}{DESC,79}{CATEGORY,4}{ONTIME, 12}{OFFTIME, 12}{ONMILLI, 6}{OFFMILLI, 6}{ONDATE, 12}{OFFDATE, 12}{ACKDATE, 12}{ACKTIME, 12}{COMMENT, 48}{SUMSTATE, 16}{STATE_DESC,16}{TYPE, 4}", "", sFileName, dBASE_DEV);
+	
+	IF nNumAlarms > 0 THEN
+		hDev = DevOpen(sName, 0);
+		hBrowse = AlmSummaryOpen("","CLUSTER,TAG,TAGEX,NAME,DESC,CATEGORY,ONTIME,OFFTIME,ONMILLI,OFFMILLI,ONDATE,OFFDATE,ACKDATE,ACKTIME,COMMENT,SUMSTATE,STATE_DESC,TYPENUM","");
+		status = AlmSummaryFirst(hBrowse);
+		WHILE (status = 0) AND (nNumRecordsFound < nNumAlarms) AND NOT (TaskGetSignal(TaskHnd()) BITAND 0x0001) DO
+
+			sRecCluster = StrTrim(AlmSummaryGetField(hBrowse, "CLUSTER"));
+			sRecTag = StrTrim(AlmSummaryGetField(hBrowse, "TAG"));
+			sRecTagEx = StrTrim(AlmSummaryGetField(hBrowse, "TAGEX"));
+			sRecCategory = AlmSummaryGetField(hBrowse, "CATEGORY");
+			nRecCategory = StrToInt(sRecCategory);
+
+			IF (	((StrLength(sTag) = 0) OR (StrUpper(sRecTag) = StrUpper(sTag)) OR (StrUpper(sRecTagEx) = StrUpper(sTag))) AND
+					((nCategory = 0) OR (nRecCategory = nCategory)) AND
+					(StrLength(sRecTag) > 0)	) THEN
+
+				sRecOnDate = AlmSummaryGetField(hBrowse, "ONDATE");
+				sRecOnTime = AlmSummaryGetField(hBrowse, "ONTIME");
+	
+				IF (nTimeCompareRequired = 1) THEN
+					nRecTimeMatch = 0
+					nRecDateTime = StrToTime(sRecOnTime) + StrToDate(sRecOnDate);
+					IF (nRecDateTime >= nStartTime) AND (nRecDateTime <= nEndTime) THEN
+						nRecTimeMatch = 1;
+					ELSE 
+						IF (bIncludeOffAndAck = 1) THEN
+							sRecOffDate = AlmSummaryGetField(hBrowse, "OFFDATE");
+							sRecOffTime = AlmSummaryGetField(hBrowse, "OFFTIME");
+							sRecAckDate = AlmSummaryGetField(hBrowse, "ACKDATE");
+							sRecAckTime = AlmSummaryGetField(hBrowse, "ACKTIME");
+							nRecOffDateTime = StrToTime(sRecOffTime) + StrToDate(sRecOffDate);
+							nRecAckDateTime = StrToTime(sRecAckTime) + StrToDate(sRecAckDate);
+							IF (((nRecOffDateTime >= nStartTime) AND (nRecOffDateTime <= nEndTime)) OR 
+								((nRecAckDateTime >= nStartTime) AND (nRecAckDateTime <= nEndTime))) THEN
+								nRecTimeMatch = 1;
+							END
+						END
+					END		
+				END
+
+				IF (nRecTimeMatch) THEN
+					nAlarmType = AlmSummaryGetField(hBrowse, "TYPENUM");
+
+					DevAppend(hDev);
+					DevSetField(hdev, "CLUSTER", sRecCluster);
+					DevSetField(hDev, "TAG", sRecTag);
+					DevSetField(hDev, "NAME", AlmSummaryGetField(hBrowse, "NAME"));
+					IF nAlarmType = ANALOG_ALARM OR nAlarmType = ARGANA_ALARM THEN
+						DevSetField(hDev, "DESC", "");	// no description for analog alarm
+					ELSE
+						DevSetField(hDev, "DESC", AlmSummaryGetField(hBrowse, "DESC"));
+					END
+					IF nAlarmType = ARGDIG_ALARM THEN
+						DevSetField(hDev, "STATE_DESC", AlmSummaryGetField(hBrowse, "STATE_DESC"));
+					ELSE
+						DevSetField(hDev, "STATE_DESC", "");	// no state description for others
+					END
+					DevSetField(hDev, "CATEGORY", sRecCategory);
+					DevSetField(hDev, "ONTIME", sRecOnTime);
+					DevSetField(hDev, "OFFTIME", AlmSummaryGetField(hBrowse, "OFFTIME"));
+					DevSetField(hDev, "ONDATE", sRecOnDate);
+					DevSetField(hDev, "OFFDATE", AlmSummaryGetField(hBrowse, "OFFDATE"));
+					DevSetField(hDev, "ACKDATE", AlmSummaryGetField(hBrowse, "ACKDATE"));
+					DevSetField(hDev, "ACKTIME", AlmSummaryGetField(hBrowse, "ACKTIME"));
+					DevSetField(hDev, "COMMENT", AlmSummaryGetField(hBrowse, "COMMENT"));
+					DevSetField(hDev, "SUMSTATE", AlmSummaryGetField(hBrowse, "SUMSTATE"));
+					DevSetField(hDev, "TYPE", nAlarmType);
+					DevSetField(hDev, "ONMILLI", AlmSummaryGetField(hBrowse, "ONMILLI"));
+					DevSetField(hDev, "OFFMILLI", AlmSummaryGetField(hBrowse, "OFFMILLI"));
+
+					nNumRecordsFound = nNumRecordsFound + 1;
+				END
+			END
+			status = AlmSummaryNext(hBrowse);
+
+			// Reduce CPU load
+			IF status = 0 THEN
+				_CTAPIReduceCPULoad();
+			END
+		END
+		AlmSummaryClose(hBrowse);
+		DevClose(hDev);
+	END
+
+	status = IsError();
+	IF status = ERR_DATABROWSE_EOF THEN
+		status = 0;
+	END
+	CAPIPost(sName, status);
+
+	LeaveCriticalSection(sName);
+	ErrSet(0);
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION:	CTAPIAlarmLog
+**		
+**	The CTAPI Alarm Log handler. This function is called via the CTAPI interface
+**	to process logged alarm queries and send them back via CTAPI.
+**	This function can only be called on an alarm server as Alarm Log files only
+**	reside on an alarm server.
+**	=====	The 'sDefaultAlarmLogFormat' should not be modified.	===== 
+**	N.B. 	- Seconds Per Day = 86400
+**			- Time-stamped alarms may not neccesarily be retrieved in chronological order
+**			- The [AlarmLog] Format must contain the Tag and Category fields, and either the
+**				LocalTimeDate or both the Time and DateExt Fields. 
+**			- The [AlarmLog] Format should not occupy more than 254 characters, else
+**				the additional characters will be clipped from entry report
+*/
+
+INT
+FUNCTION
+CTAPIAlarmLog(STRING sStartDate, STRING sStartTime, STRING sEndDate, STRING sEndTime, INT nCategory, INT nNumAlarms, STRING sTag = "")
+	INT		nStartDateTime = 0;						// Secs since 1/1/70
+	INT		nEndDateTime = 0;						// Secs since 1/1/70
+
+	IF StrLength(sStartTime) <> 0 THEN
+		nStartDateTime = _ConvertLocalTimeDateFormat(sStartTime);
+		IF nStartDateTime = 0 THEN 
+			nStartDateTime = StrToTime(sStartTime) + StrToDate(sStartDate);
+		END
+	END
+
+	IF StrLength(sEndTime) <> 0 THEN
+		nEndDateTime = _ConvertLocalTimeDateFormat(sEndTime);
+		IF nEndDateTime = 0 THEN
+			nEndDateTime = StrToTime(sEndTime) + StrToDate(sEndDate);
+		END
+	END
+
+	RETURN CTAPIAlarmLogV2(nStartDateTime, nEndDateTime, nCategory, nNumAlarms, sTag)	
+END
+
+
+/*
+**	FUNCTION:	CTAPIAlarmLogV2
+**		
+**	The CTAPI Alarm Log handler. This function is called via the CTAPI interface
+**	to process logged alarm queries and send them back via CTAPI.
+**	This function can only be called on an alarm server as Alarm Log files only
+**	reside on an alarm server.
+**	=====	The 'sDefaultAlarmLogFormat' should not be modified.	===== 
+**	N.B. 	- Seconds Per Day = 86400
+**			- Time-stamped alarms may not neccesarily be retrieved in chronological order
+**			- The [AlarmLog] Format must contain the Tag and Category fields, and either the
+**				LocalTimeDate or both the Time and DateExt Fields. 
+**			- The [AlarmLog] Format should not occupy more than 254 characters, else
+**				the additional characters will be clipped from entry report
+**			- The nStartDateTime and nEndDateTime parameters are UTC number of seconds since 1/1/70
+*/
+
+INT
+FUNCTION
+CTAPIAlarmLogV2(INT nStartDateTime, INT nEndDateTime, INT nCategory, INT nNumAlarms, STRING sTag = "")
+	STRING	sNumFiles = "";							// Max number of log files (set in INI)
+	STRING	sDevName;								// Name of Query device
+	STRING	sDevFileName;							// Name of Query device file
+	STRING	sAlarmLogName = "";						// Name of Alarm Log
+	STRING	sAlarmLogFormat = "";					// Specified Alarm Log Format
+	STRING	sDefaultAlarmLogFormat = "{LocalTimeDate,23} {Tag,79} {Desc,79} {Category,16} {LogState,16} {State,16} {State_Desc,16} {Type,16}";
+	STRING	sLoggedFormat = "";						// Format used in logged file 
+	STRING	sCapitalisedLoggedFormat = ""; 			// Format used in logged file (trimmed and uppercase)
+	STRING	sCapitalisedDefaultAlarmLogFormat = "";	// Default Alarm Log Format (trimmed and uppercase)
+	INT		nStartTime = 0;							// Secs since midnight
+	INT		nEndTime = 0;							// Secs since midnight
+	INT		nSearchDateTime = 0;					// Date/time at current point of search
+	INT		nDefaultSearchDays = 0;					// Number of days prior to end date/time for start date/time 
+	INT		nAlarmsFound = 0;						// Number of Alarm Log entries found 
+	INT		hFile = -1;
+	INT		hLoggedFmt = -1;						// Handle for format used in logged file
+	INT		hDev = -1;
+	INT		bStartUnknown = 1;						// flag to indicate if start date/time specified
+	INT		bStdFmt = 0;							// flag to indicate if Alarm log was generated with default log format
+		
+	ErrSet(1);
+
+	sDevName = GetQueryDevName();
+
+	EnterCriticalSection(sDevName);
+
+	// default search days to number of files being logged - if logging disabled, default to 100
+	sNumFiles = ParameterGet("AlarmLog", "NumFiles", "");
+	IF (sNumFiles = "") OR (sNumFiles = "0") THEN
+		sNumFiles = "100";
+	END
+	nDefaultSearchDays = StrToInt(ParameterGet("AlarmLog", "DefaultSearchDays", sNumFiles));
+	
+	sDevFileName = "[data]:" + sDevName + ".dbf";
+	sAlarmLogFormat = ParameterGet("AlarmLog", "Format", sDefaultAlarmLogFormat);
+	sCapitalisedDefaultAlarmLogFormat = StrUpper(StrTrim(sDefaultAlarmLogFormat));
+
+	IF (nStartDateTime <> 0) THEN
+		bStartUnknown = False;
+	END
+
+	IF (nEndDateTime = 0) THEN	
+		nEndDateTime = _StartOfNextDay(TimeCurrent()) - 1;
+	END
+
+	IF nNumAlarms = -1 THEN
+		nNumAlarms = 999999999;
+	END
+
+	IF FileExist(sDevFileName) THEN
+		FileDelete(sDevFileName);
+	END
+
+	DevModify(sDevName, sAlarmLogFormat, "", sDevFileName, dBASE_DEV);
+
+	IF nNumAlarms > 0 THEN
+		hDev = DevOpen(sDevName, 0);
+
+		nSearchDateTime = nStartDateTime;
+		IF bStartUnknown THEN
+			nSearchDateTime = _GetNextSearchDateTime(nSearchDateTime, nEndDateTime, nDefaultSearchDays);
+		END 
+		WHILE 	(nSearchDateTime <= nEndDateTime) AND
+				(nAlarmsFound < nNumAlarms) AND
+				NOT (TaskGetSignal(TaskHnd()) BITAND 0x0001) DO	
+
+			sAlarmLogName = _GetAlarmLogFileName(nSearchDateTime);
+			hFile = FileOpen("[DATA]:" + sAlarmLogName, "r");
+			IF hFile <> -1 THEN
+				sLoggedFormat = StrTrim(FileReadLn(hFile));
+				hLoggedFmt = FmtOpen("LoggedFormat", sLoggedFormat, 1);
+				sCapitalisedLoggedFormat = StrUpper(sLoggedFormat);
+				IF sCapitalisedLoggedFormat = sCapitalisedDefaultAlarmLogFormat THEN
+					bStdFmt = 1;
+				END 			
+				IF nSearchDateTime = nStartDateTime THEN
+					nStartTime = nStartDateTime - TimeMidNight(nStartDateTime);
+				ELSE
+					nStartTime = 0;
+				END
+				IF TimeMidNight(nSearchDateTime) = TimeMidNight(nEndDateTime) THEN
+					nEndTime = nEndDateTime - TimeMidNight(nEndDateTime);
+				ELSE
+					nEndTime = 86400;
+				END
+				nAlarmsFound = _UpdateDeviceFromAlarmLog(hDev, hFile, hLoggedFmt, nStartTime, nEndTime, nNumAlarms, nAlarmsFound, sTag, nCategory, bStdFmt);
+				FmtClose(hLoggedFmt);
+				FileClose(hFile);
+			ELSE
+				// clear error
+				IsError();
+			END
+			nSearchDateTime = _StartOfNextDay(nSearchDateTime);
+			IF bStartUnknown THEN
+				nSearchDateTime = _GetNextSearchDateTime(nSearchDateTime, nEndDateTime, nDefaultSearchDays);
+			END 
+		END
+
+		DevClose(hDev);
+	END
+
+	CAPIPost(sDevName, IsError());
+
+	LeaveCriticalSection(sDevName);
+	ErrSet(0);
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION:	_ConvertLocalTimeDateFormat
+**		
+**	Determines the DateTime by interpreting the time string
+**	in the fixed LocalTimeDate format ("yyyy-mm-dd hh:mm:ss[.ttt]"
+**	Returns zero if unsuccesful.
+*/
+
+INT
+FUNCTION
+_ConvertLocalTimeDateFormat(STRING sLocalTimeDate)
+
+	STRING	sDateDel = "";
+	STRING	sDate = "";
+	INT		nDateOrder = 0;
+	INT		hLTDFmt = -1;
+	INT		nYear = 0;	
+	INT		nMonth = 0;	
+	INT		nDay = 0;	
+	INT		nHour = 0;	
+	INT		nMinute = 0;	
+	INT		nSecond = 0;	
+	INT		nDateTime = 0;	
+	
+	hLTDFmt = FmtOpen("LocalTimeDateFormat", gsLocalTimeDateFormat, 1);
+	IF hLTDFmt <> -1 THEN
+		StrToFmt(hLTDFmt, sLocalTimeDate);
+		
+		nYear	= StrToInt(FmtGetField(hLTDFmt, "Year"));
+		nMonth	= StrToInt(FmtGetField(hLTDFmt, "Month"));
+		nDay	= StrToInt(FmtGetField(hLTDFmt, "Day"));
+		nHour	= StrToInt(FmtGetField(hLTDFmt, "Hour"));
+		nMinute	= StrToInt(FmtGetField(hLTDFmt, "Minute"));
+		nSecond	= StrToInt(FmtGetField(hLTDFmt, "Second"));
+		
+		IF	nYear >= 1980 AND nYear <= 2035 AND nMonth >= 1 AND nMonth <= 12 AND nDay >= 1 AND nDay <= 31 AND
+			nHour >= 0 AND nHour <= 23 AND nMinute >= 0 AND nMinute <= 59 AND nSecond >= 0 AND nSecond <= 59 THEN
+
+			sDateDel  = DateInfo(2,0);
+			nDateOrder = StrToInt(DateInfo(1,0));
+			
+			SELECT CASE nDateOrder 
+			
+			CASE 0
+				// MMDDYY
+				sDate = nMonth:## + sDateDel  + nDay:## + sDateDel + nYear:##;
+			CASE 1
+				// DDMMYY
+				sDate = nDay:## + sDateDel  + nMonth:## + sDateDel + nYear:##;
+			CASE 2
+				// YYMMDD
+				sDate = nYear:## + sDateDel  + nMonth:## + sDateDel + nDay:##;
+			CASE ELSE
+				sDate = "";
+			END SELECT
+
+			nDateTime = StrToDate(sDate);
+			
+			IF nDateTime > 274 THEN
+				nDateTime = nDateTime + nHour * 60 * 60 + nMinute * 60 + nSecond;
+			ELSE
+				nDateTime = 0;
+			END
+		END
+		
+		FmtClose(hLTDFmt);
+	END
+
+	RETURN nDateTime; 
+END
+
+/*
+**	FUNCTION:	_GetNextSearchDateTime
+**		
+**	Determines the next DateTime for deciding which Alarm Log
+**	to search through. This function is only required when the
+**  start date/time of search is unknown.
+**	Currently this module simply sets the start of the search from
+**	the day that is 'nDefaultSearchDays' prior to the end date, and
+**  attempts to open a file for each day, skipping over non existant
+**	files. This may have to be changed to a more elegant solution
+**	involving searching for files at a later point. 
+**	N.B. 	- Seconds Per Day = 86400
+*/
+
+INT
+FUNCTION
+_GetNextSearchDateTime(INT nSearchDateTime, INT nEndDateTime, INT nDefaultSearchDays)
+	STRING	sFileName = "";
+	INT		nNewDateTime;
+	
+	IF nSearchDateTime = 0 THEN
+		nNewDateTime = DateSub(nEndDateTime, (nDefaultSearchDays-1)*86400);
+	ELSE
+		nNewDateTime = nSearchDateTime;
+	END
+
+	sFileName = _GetAlarmLogFileName(nNewDateTime);
+	WHILE ((NOT FileExist("[DATA]:"+sFileName)) AND (nNewDateTime <= nEndDateTime)) DO
+		nNewDateTime = DateAdd(nNewDateTime, 86400);
+		sFileName = _GetAlarmLogFileName(nNewDateTime);
+	END	
+		
+	RETURN nNewDateTime;
+END
+
+/*
+**	FUNCTION:	_GetAlarmLogFileName
+**		
+**	Determines the name of the alarm log file that corresponds to
+**	the given Date/Time.
+*/
+
+STRING
+FUNCTION
+_GetAlarmLogFileName(INT nDateTime)
+	STRING sYear;
+	STRING sMonth;
+	STRING sDay;
+	STRING sFileName;
+	
+	sYear = DateYear(nDateTime,1):####;
+	sMonth = StrPad(DateMonth(nDateTime),"0",-2);
+	sDay = StrPad(DateDay(nDateTime),"0",-2);
+	sFileName = sYear + sMonth + sDay + ".txt";
+	
+	RETURN sFileName;
+END
+
+/*
+**	FUNCTION:	_StartOfNextDay
+**		
+**	Determines the Date/Time at the start of the next day
+**	N.B. 	- Seconds Per Day = 86400
+*/
+
+INT
+FUNCTION
+_StartOfNextDay(INT nDateTime)
+		
+	RETURN DateAdd(TimeMidNight(nDateTime), 86400);
+END
+
+/*
+**	FUNCTION:	_UpdateDeviceFromAlarmLog
+**		
+**	Copy alarm log entries from the specified log file to the specified device.
+**	Only include entries within the specified time limits.
+**	N.B.	- only supports alarm log line entries of up to 254 characters
+**			- nStartTime and nEndTime are in seconds since midnight 
+**			- Seconds Per Day = 86400
+**			- Split into two loops to (marginally!)optimise search
+**			- Partial day search still needs to check past end time in case
+**				file contains a time-stamped alarm that is out of chronological order
+*/
+
+INT
+FUNCTION
+_UpdateDeviceFromAlarmLog(INT hDev, INT hFile, INT hLoggedFmt, INT nStartTime, INT nEndTime, INT nNumAlarms, INT nAlarmsFound, STRING sTag, INT nCategory, INT bStdFmt)
+	STRING	sAlarmLine = "";
+	STRING	sClippedAlarmLine = "";
+	INT		nTime = 0;
+	INT		bDeviceUpdated = 0;
+	
+	IF  nStartTime <= 0 AND nEndTime >= 86399 THEN
+		// Transfer all entries (up to nNumAlarms)
+		WHILE 	(NOT FileEOF(hFile)) AND
+				(nAlarmsFound < nNumAlarms) AND
+				NOT (TaskGetSignal(TaskHnd()) BITAND 0x0001) DO
+			sAlarmLine = FileReadLn(hFile);
+			sClippedAlarmLine = StrLeft(sAlarmLine, 254);
+			StrToFmt(hLoggedFmt, sClippedAlarmLine);
+			bDeviceUpdated = _UpdateDeviceFromFormattedAlarmLogEntry(hDev, hLoggedFmt, sTag, nCategory, bStdFmt);
+			IF bDeviceUpdated THEN
+				nAlarmsFound = nAlarmsFound + 1;
+			END
+		END
+	ELSE
+		// Transfer partial entries (up to nNumAlarms)
+		WHILE	(NOT FileEOF(hFile)) AND
+				(nAlarmsFound < nNumAlarms) AND
+				NOT (TaskGetSignal(TaskHnd()) BITAND 0x0001) DO
+			sAlarmLine = FileReadLn(hFile);
+			sClippedAlarmLine = StrLeft(sAlarmLine, 254);
+			StrToFmt(hLoggedFmt, sClippedAlarmLine);
+			nTime = _TimeOfFormattedAlarmLogEntry(hLoggedFmt);
+			IF (nTime >= nStartTime) AND (nTime <= nEndTime) THEN
+				bDeviceUpdated = _UpdateDeviceFromFormattedAlarmLogEntry(hDev, hLoggedFmt, sTag, nCategory, bStdFmt);
+				IF bDeviceUpdated THEN
+					nAlarmsFound = nAlarmsFound + 1;
+				END
+			END
+		END
+	END
+
+	RETURN nAlarmsFound;
+END
+
+/*
+**	FUNCTION:	_UpdateDeviceFromFormattedAlarmLogEntry
+**		
+**	Copy alarm log entry to the specified device.
+**	N.B. Alarm Log entry must be formatted by StrToFmt()
+**		before calling this routine.
+*/
+
+INT
+FUNCTION
+_UpdateDeviceFromFormattedAlarmLogEntry(INT hDev, INT hLoggedFmt, STRING sTag, INT nCategory, INT bStdFmt)
+	STRING	sFieldData = "";
+	STRING 	sEntryTag = "";
+	STRING 	sEntryCategory = "";
+	INT		nEntryCategory = 0;
+	INT 	bValidMatch = 0;
+	
+	sEntryTag = FmtGetField(hLoggedFmt, "Tag");
+	sEntryTag = StrTrim(sEntryTag);
+	sEntryCategory = FmtGetField(hLoggedFmt, "Category");
+	nEntryCategory = StrToInt(sEntryCategory);
+
+	IF (	((StrLength(sTag) = 0) OR (StrUpper(sEntryTag) = StrUpper(sTag))) AND
+			((nCategory = 0) OR (nEntryCategory = nCategory)) AND
+			(StrLength(sEntryTag) > 0)) THEN
+
+		DevAppend(hDev);
+
+		//compulsory fields		
+		DevSetField(hDev, "Tag", sEntryTag);
+		DevSetField(hDev, "Category", sEntryCategory);
+		sFieldData = FmtGetField(hLoggedFmt, "LocalTimeDate");
+		IF sFieldData <> "" THEN
+			DevSetField(hDev, "LocalTimeDate", sFieldData);
+		ELSE
+			IsError();	// clear error
+			sFieldData = FmtGetField(hLoggedFmt, "Time");
+			DevSetField(hDev, "Time", sFieldData);
+			sFieldData = FmtGetField(hLoggedFmt, "DateExt");
+			DevSetField(hDev, "DateExt", sFieldData);
+		END
+		
+		// optional fields (defined in standard format)
+		_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Desc");
+		_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "State");
+		_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "LogState");
+		_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Type");
+		_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "State_Desc");
+
+
+		// optional fields (not defined in standard format)
+		IF NOT bStdFmt THEN
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Name");
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Millisec");
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Help");
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Area");
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Priv");
+			_UpdateDeviceAlarmLogField(hDev, hLoggedFmt, "Value");
+		END
+		
+		bValidMatch = 1;
+		
+		_CTAPIReduceCPULoad();
+
+	END
+	
+	RETURN bValidMatch;
+	 
+END
+
+/*
+**	FUNCTION:	_TimeOfFormattedAlarmLogEntry
+**		
+**	Determine time field of alarm log entry.
+**	N.B. Alarm Log entry must be formatted by StrToFmt()
+**		before calling this routine.
+*/
+
+INT
+FUNCTION
+_TimeOfFormattedAlarmLogEntry(INT hFormat)
+
+	STRING	sLocalTimeDate = "";
+	STRING	sTime = "";
+	INT		hLTDFmt = -1;
+	INT		nHour = 0;	
+	INT		nMinute = 0;	
+	INT		nSecond = 0;	
+	INT		nTime = -1;	
+
+	sLocalTimeDate = FmtGetField(hFormat, "LocalTimeDate");
+	IF sLocalTimeDate <> "" THEN
+		hLTDFmt = FmtOpen("LocalTimeDateFormat", gsLocalTimeDateFormat, 1);
+		IF hLTDFmt <> -1 THEN
+			StrToFmt(hLTDFmt, sLocalTimeDate);
+	
+			nHour	= StrToInt(FmtGetField(hLTDFmt, "Hour"));
+			nMinute	= StrToInt(FmtGetField(hLTDFmt, "Minute"));
+			nSecond	= StrToInt(FmtGetField(hLTDFmt, "Second"));
+			nTime = nHour * 60 * 60 + nMinute * 60 + nSecond;
+			
+			FmtClose(hLTDFmt);
+		END
+	ELSE
+		IsError();	// clear error
+		sTime = FmtGetField(hFormat, "Time");
+		IF sTime <> "" THEN
+			nTime = StrToTime(sTime);
+		END
+	END
+	
+	RETURN nTime; 
+
+END
+
+/*
+**	FUNCTION:	_UpdateDeviceAlarmLogField
+**		
+**	If Alarm Log format includes field, update device with that field
+**	of an Alarm Log Entry.
+**	This function processes fields that have a low probability of usage.
+**	N.B. Alarm Log entry must be formatted by StrToFmt()
+**		before calling this routine.
+*/
+
+INT
+FUNCTION
+_UpdateDeviceAlarmLogField(INT hDev, INT hLoggedFmt, STRING sFieldName)
+	INT		hField = -1;
+	INT		bFieldPresent = 0;
+	STRING  sFieldData = "";
+	
+	hField = FmtFieldHnd(hLoggedFmt, sFieldName);
+	IF hField <> -1 THEN
+		sFieldData = FmtGetFieldHnd(hLoggedFmt, hField);
+		DevSetField(hDev, sFieldName, sFieldData);
+		bFieldPresent = 1;
+	ELSE
+		// clear error
+		IsError();
+	END
+	
+
+	RETURN bFieldPresent;
+
+END
+
+/*
+**	FUNCTION:	VbCallRun
+**
+**	The VB script execution call. This function acts as the scheduler for
+**	multi-threaded VB scripting in Citect. Each call made to the script via
+**	_VbCallRun() will step the given script by one line. In this way VB scripts
+**	are effectively executed as cicode threads and have the same multi-threaded
+**	features and behaviour as Cicode. This function must be present for VB 
+**	scripting support in Citect to function.
+**
+**	To call a VB function within Cicode you must use the VbCallOpen() user function 
+**	to open a VB script and then use the returned handled in the call TO VbCallRun().
+**	TO obtain the return value for the call use the VbCallReturn() user function. 
+**	A typical example might be:
+**
+**	MotorSpeed = VbCallReturn(VbCallRun(VbCallOpen("SetMotorSpeed", 30)))
+**
+**	The equivalent VB call that this cicode sequence produces is,
+**
+**	MotorSpeed = SetMotorSpeed(30)
+*/
+/*
+**	IF calling VB in expression fields OR command fields simply use the VBSCRIPT
+**	compilation over-ride. FOR example, IF the above were required in a command
+**	field we would write,
+**
+**	VBSCRIPT MotorSpeed = SetMotorSpeed(30)
+**
+*/
+
+OBJECT
+FUNCTION
+VbCallRun(OBJECT hVbCall)
+	WHILE (_VbCallRun(hVbCall)) DO
+	END
+	RETURN (hVbCall);
+END
+
+/*
+**	FUNCTION:	DelayShutdown
+**		
+**	Shuts down Citect after a specified time in milliseconds.
+*/
+
+FUNCTION
+DelayShutdown(INT nDelay)
+
+	SleepMS(nDelay);
+	Shutdown();
+END
+
+/*
+**	FUNCTION:	CTAPIDBF
+**
+**	The CTAPI Read DBF file handler. This function is called via the CTAPI interface
+**	to read DBF files and send them back via CTAPI.
+**
+*/
+
+INT
+FUNCTION
+CTAPIDBF(STRING sFile)
+	STRING	sName;
+	
+	ErrSet(1);
+	sName = GetQueryDevName();
+
+	EnterCriticalSection(sName);
+	
+	DevModify(sName, "*", "", sFile, dBASE_DEV);
+
+	CAPIPost(sName, 0);
+
+	LeaveCriticalSection(sName);
+	ErrSet(0);
+
+	RETURN 0;
+END
+
+
+
+/*
+**	FUNCTION NAME:	PageDisplay
+**
+**	Display a Page  	
+**
+**	Note: The existing Cicode function "PageDisplay" has been renamed to "_PageDisplay"
+**	and a new Wrapper function named "PageDisplay" below was created. If new CSV pages are 
+**  being currently displayed, the code below will call TaskNew for CSV_MM_PageDisplay, otherwise
+**  "_PageDisplay" will be used and behave like normal.
+**
+*/
+INT
+FUNCTION
+PageDisplay(STRING sPageName, STRING sCluster = "")
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _PageDisplay(sPageName, sCluster);
+	ELSE 
+		IF sCluster <> "" THEN
+			sPageName = sCluster + "." + sPageName;
+		END
+		TaskNew("CSV_MM_PageDisplay","^"" + sPageName + "^"",0);
+	END
+	
+	RETURN nError;
+END
+
+INT
+FUNCTION
+WinTitle(STRING sWinTitle)
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _WinTitle(sWinTitle);
+	ELSE 
+		TaskNew("CSV_MM_WinTitle","^"" + sWinTitle + "^"",0);
+	END
+	
+	RETURN nError;
+END
+
+FUNCTION
+PageAlarm(INT nCategory = 0)
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageAlarm(nCategory);
+	ELSE 
+		TaskNew("CSV_MM_PageAlarm","^"" + IntToStr(nCategory) + "^"",0);
+	END
+END
+
+FUNCTION
+PageSummary(INT nCategory = 0)
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageSummary(nCategory);
+	ELSE 
+		TaskNew("CSV_MM_PageSummary","^"" + IntToStr(nCategory) + "^"",0);
+	END
+END
+
+FUNCTION
+PageHardware()
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageHardware();
+	ELSE 
+		TaskNew("CSV_MM_PageHardware","",0);
+	END
+END
+
+FUNCTION
+PageDisabled(INT nCategory = 0)
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageDisabled(nCategory);
+	ELSE 
+		TaskNew("CSV_MM_PageDisabled","^"" + IntToStr(nCategory) + "^"",0);
+	END
+END
+
+FUNCTION
+PageFile(STRING sFile = "")
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageFile(sFile);
+	ELSE 
+		TaskNew("CSV_MM_PageFile","^"" + sFile + "^"",0);
+	END
+END
+
+INT
+FUNCTION
+PageGoto(STRING sPageName, STRING sCluster = "")
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _PageGoto(sPageName, sCluster);
+	ELSE 
+		IF sCluster <> "" THEN
+			sPageName = sCluster + "." + sPageName;
+		END
+		TaskNew("CSV_MM_PageGoto","^"" + sPageName + "^"",0);
+	END
+	
+	RETURN nError;
+END
+
+FUNCTION
+PageSelect()
+	STRING	sCSVMode;
+
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		_PageSelect();
+	ELSE 
+		TaskNew("CSV_MM_PageSelect","",0);
+	END
+END
+
+INT
+FUNCTION
+PageTrend(STRING sPage = "", STRING sPen1 = "", STRING sPen2  = "", STRING sPen3  = "", 
+	  		STRING sPen4 = "", STRING sPen5 = "", STRING sPen6 = "", STRING sPen7  = "",
+	  		STRING sPen8 = "")
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _PageTrend(sPage, "", sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	ELSE 
+		TaskNew("CSV_Trend_Page", "^""+sPage+"^",^""+sPen1+"^",^""+sPen2+"^",^""+sPen3+"^",^""+sPen4+"^",^""+sPen5+"^",^""+sPen6+"^",^""+sPen7+"^",^""+sPen8+"^"", 0)
+	END
+	
+	RETURN nError;
+END
+
+INT
+FUNCTION
+PageTrendEx(STRING sPage = "", STRING sCluster = "", STRING sPen1 = "", STRING sPen2  = "", STRING sPen3  = "", 
+	  		STRING sPen4 = "", STRING sPen5 = "", STRING sPen6 = "", STRING sPen7  = "",
+	  		STRING sPen8 = "")
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _PageTrend(sPage, sCluster, sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	ELSE 
+		TaskNew("CSV_Trend_Page", "^""+sPage+"^",^""+sPen1+"^",^""+sPen2+"^",^""+sPen3+"^",^""+sPen4+"^",^""+sPen5+"^",^""+sPen6+"^",^""+sPen7+"^",^""+sPen8+"^"", 0, sCluster)
+	END
+	
+	RETURN nError;
+END
+
+INT
+FUNCTION
+TrendWin(STRING sPage, INT X, INT Y, INT Mode, STRING sPen1 = "", 
+	 		STRING sPen2 = "", STRING sPen3 = "", STRING sPen4 = "", 
+			STRING sPen5 = "", STRING sPen6 = "", STRING sPen7 = "", 
+			STRING sPen8 = "")
+	 
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _TrendWin(sPage, X, Y, Mode, sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	ELSE 
+		TaskNew("CSV_Trend_Win", "^""+sPage+"^",^""+IntToStr(X)+"^",^""+IntToStr(Y)+"^",^""+IntToStr(Mode)+"^",^""+sPen1+"^",^""+sPen2+"^",^""+sPen3+"^",^""+sPen4+"^",^""+sPen5+"^",^""+sPen6+"^",^""+sPen7+"^",^""+sPen8+"^"", 0);
+	END
+	
+	RETURN nError;
+END
+
+INT
+FUNCTION
+TrendPopUp(STRING sPopTrend = "", STRING sPen1 = "", STRING sPen2 = "", 
+			STRING sPen3 = "", STRING sPen4 = "", STRING sPen5 = "", 
+			STRING sPen6 = "", STRING sPen7 = "", STRING sPen8 = "")
+	 
+	STRING	sCSVMode;
+	INT nError = 0;
+	
+	sCSVMode = ParameterGet("Startup", "InitMultiMonitors", "0");
+	IF sCSVMode = "0" THEN
+		nError = _TrendPopUp(sPopTrend, sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	ELSE 
+		TaskNew("CSV_Trend_Popup", "^""+sPopTrend+"^",^""+sPen1+"^",^""+sPen2+"^",^""+sPen3+"^",^""+sPen4+"^",^""+sPen5+"^",^""+sPen6+"^",^""+sPen7+"^",^""+sPen8+"^"", 0);
+	END
+	
+	RETURN nError;
+END
+
+
+INT
+FUNCTION	DspGetMouseOver(INT iAn = -1, INT b = 0)
+
+	INT	iCurrAn;
+	INT	iPrevAN;
+	INT	iXPos;
+	INT	iYPos;
+	INT	iXTop;
+	INT	iYTop;
+	INT	iXBottom;
+	INT	iYBottom;
+
+
+	IF (iAn = -1) THEN iAn = DspGetAnCur(); END
+
+	IF (iAn <= 0) THEN RETURN (FALSE); END
+
+	DspGetMouse(iXPos, iYPos);
+
+	DspGetAnExtent(iAn, iYTop, iXTop, iYBottom, iXBottom);
+
+	IF (iXPos >= iXTop) AND (iXPos <= iXBottom) AND
+	   (iYPos >= iYTop) AND (iYPos <= iYBottom) THEN
+
+		RETURN (TRUE);
+	END
+
+	RETURN (FALSE);
+END
+
+//////////////////////////////////////////////////////////////////////
+//
+//	FUNCTION:	ProcessIsClient
+//		
+//	Returns TRUE if the currently executing process contains a Client
+//  component, otherwise FALSE.
+//
+//////////////////////////////////////////////////////////////////////
+INT FUNCTION ProcessIsClient()
+
+	INT		bIsClient		= FALSE;
+	STRING	sServiceList	= "";
+
+	sServiceList = StrLower(ServiceGetList());
+	
+	IF (sServiceList = "client") THEN
+		bIsClient = TRUE;
+	ELSE
+		IF (StrRight(sServiceList, 7) = ",client") THEN
+			bIsClient = TRUE;
+		END
+	END
+	
+	RETURN bIsClient;
+END
+
+//////////////////////////////////////////////////////////////////////
+//
+//	FUNCTION:	ProcessIsServer
+//		
+//	Returns TRUE if the currently executing process contains a Client
+//  component, otherwise FALSE.
+//
+//////////////////////////////////////////////////////////////////////
+INT FUNCTION ProcessIsServer(STRING serverType, STRING clusterName = "", STRING serverName = "")
+
+	INT		bIsServer		= FALSE;
+	INT		nArrayIndex		= -1;
+	
+	serverType	= StrLower(serverType);
+	clusterName	= StrLower(clusterName);
+	serverName	= StrLower(serverName);
+	
+	// This can be expanded to include more server types in the future.
+	SELECT CASE serverType
+		CASE "ioserver"
+			nArrayIndex = 0;
+		CASE "trend"
+			nArrayIndex = 1;
+		CASE "alarm"
+			nArrayIndex = 2;
+		CASE "report"
+			nArrayIndex = 3;
+	END SELECT
+	
+	IF (nArrayIndex >= 0) THEN
+	
+		_UpdateServiceArray(serverType, nArrayIndex);
+		
+		IF (StrLength(clusterName) > 0) THEN
+			IF (StrLength(serverName) > 0) THEN
+			
+				// Caller is asking if a specific server instance is running.
+				bIsServer = ((m_ServiceArray[nArrayIndex][0] = clusterName) AND
+							(m_ServiceArray[nArrayIndex][1] = serverName));
+			ELSE
+			
+				// Caller is asking if there is any server instance of the specified type 
+				// running on the specified cluster.
+				bIsServer = (m_ServiceArray[nArrayIndex][0] = clusterName);
+			END
+		ELSE
+			IF (StrLength(serverName) > 0) THEN
+			
+				// Caller is asking if a specific server name of the specified type is
+				// is running on any cluster.
+				bIsServer = (m_ServiceArray[nArrayIndex][1] = serverName);
+			ELSE
+			
+				// Caller is asking if a any instance of a specified server type is running.
+				bIsServer = (StrLength(m_ServiceArray[nArrayIndex][0]) > 0);
+			END
+		END
+	END
+	
+	RETURN bIsServer;
+END
+
+//////////////////////////////////////////////////////////////////////
+//
+//	FUNCTION:	_UpdateServiceArray
+//		
+//	Updates the module level service list array.
+//
+//////////////////////////////////////////////////////////////////////
+FUNCTION _UpdateServiceArray(STRING serverType, INT nArrayindex)
+
+	STRING	serviceList			= "";
+	
+	// Lazy loading (this will only occur once).
+	IF (StrLength(m_ServiceArray[nArrayindex][0]) = 0) THEN
+	
+		serviceList = StrLower(ServiceGetList());
+		_ExtractServiceInfo(serviceList, serverType, nArrayIndex);
+	END
+END
+
+//////////////////////////////////////////////////////////////////////
+//
+//	FUNCTION:	_ExtractServiceInfo
+//		
+//	Parses a service list string and extract information for a single
+//	service.  The extracted info is stored in the module level string
+//	array.  
+//
+//////////////////////////////////////////////////////////////////////
+FUNCTION _ExtractServiceInfo(STRING serviceList, STRING serviceType, INT arrayIndex);
+
+	INT		nTypeStart			= 0;
+	INT		nClusterNameStart	= 0;
+	INT		nServerNameStart	= 0;
+	INT		nSeparator			= 0;
+	STRING	clusterName			= "";
+	STRING	serverName			= "";
+	
+	// Ensure strict parsing is performed.
+	serviceType = "," + serviceType + ".";
+	serviceList = "," + serviceList;
+
+	// Work out where the info is located.	
+	nTypeStart = StrSearch(0, serviceList, serviceType)
+	IF (nTypeStart >= 0) THEN
+		nClusterNameStart = nTypeStart + StrLength(serviceType);
+		nServerNameStart = StrSearch(nClusterNameStart, serviceList, ".") + 1;	// add 1 for the period
+		nSeparator = StrSearch(nServerNameStart, serviceList, ",");
+		IF (nSeparator = -1) THEN
+			nSeparator = StrLength(serviceList);
+		END
+		
+		clusterName = StrMid(serviceList, nClusterNameStart, nServerNameStart - nClusterNameStart - 1);
+		serverName = StrMid(serviceList, nServerNameStart, nSeparator - nServerNameStart);
+		
+		m_ServiceArray[arrayIndex][0] = clusterName;
+		m_ServiceArray[arrayIndex][1] = serverName;
+	END	
+END

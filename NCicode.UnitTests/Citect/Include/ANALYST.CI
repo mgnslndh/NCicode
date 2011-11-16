@@ -1,0 +1,1425 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:	ANALYST.CI
+//
+//	DESCRIPTION:
+//
+//		Contains functions associated with the Process Analyst for the Standard Example Project.
+//
+//	PUBLIC FUNCTIONS:
+//
+//				
+// 	NOTES:
+//
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//	MODULE VARIABLES
+
+// The Pane List Object
+// -------------------
+// A list is used to display a list of PA panes when the user wishes to add a trend group.
+// This list handle enables reuse of the list object for subsequent calls.
+INT		mhPaneList = -1;
+
+// Demo Process Analyst View Files
+// -------------------------------
+// The Example page for the Process Analyst features a "Demo" mode which will scroll
+// through a number of preconfigured PAV files that are shipped with the project.
+// New files can be added to this list, to do so, just add the name to this array and
+// be sure to update the mnDemoPAVCount variable and array size accordingly.
+// Also set here is the amount of time (mnDemoCycleInterval) between page transitions
+// when the demo is cycling the PAV files (in milliseconds).
+INT		mnDemoPAVCount = 5;
+STRING	msDemoPAVs[5] = "looppage.pav",  "looppageXP.pav", "multipleloop.pav", "alarms.pav", "example.pav"; 
+INT		mnDemoCycleInterval = 15000;
+
+
+// Preconfigured PAV Files
+// -----------------------
+// The Example page FOR the Process Analyst will attempt to load the PAV file that
+// is most relevant to the users last action. For example, if the user was viewing
+// the Loops Page, looppage.pav is loaded. If a user is viewing any of the Alarms
+// pages, the PAV specified below by msAlarmsPav below is used. In the event that 
+// no specific PAV makes sense, the msDefaultPav below is used.
+STRING	msDefaultPav = "example.pav";
+STRING	msAlarmsPav = "alarms.pav";
+
+
+// Standard Command Identifiers
+// ----------------------------
+// The PA example page piggy backs some functionality onto standard user actions. These
+// actions are identified by StandardCommand IDs which are hard coded into the PA
+// source code. These values must be kept consistent with the PA source.
+STRING	StandardCommands_LoadConfig_ID 				= "Citect_Command_LoadConfig";
+STRING	StandardCommands_ToggleCursorVisibility_ID 	= "Citect_Command_ToggleCursorVisibility";
+
+// Custom Command Identifiers
+// --------------------------
+// The PA example page adds custom buttons to the Process Analyst. These globals hold the
+// custom command identifiers for the buttons to enable the correct action to be taken when
+// one is executed by the user.
+STRING	msPlayDemoID 		= "";
+STRING	msStopDemoID 		= "";
+STRING	msDiffCursorsID 	= ""
+
+// State Variables
+// --------------------
+// The variable hold the current state of the demo move in the example PA page.
+INT		mbDemoRunning 		= 0;
+INT		mnCurrentPavIndex 	= 0;
+// The loaded variable blocks the processing of the events while a PAV is loading
+INT		mbPavLoading		= 0;
+
+// Difference Cursor Variables
+// ---------------------------
+// The "Difference Cursor" functionality is a custom PA command implemented entirely 
+// in CiCode. Since the name of the Cursors and the name of the custom ListView 
+// column need to be internationalized, some strings are stored here as globals and
+// initialized on page entry.
+STRING 	msDiffColumnName 	= "Difference Cursor";
+STRING 	msDiffCursor1Name;
+STRING 	msDiffCursor2Name;
+STRING	msDiffColumnText;
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_SamplePageLoad()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler called when the PA Example Page is loaded.
+//				
+// 		ARGUMENTS:
+//
+//			None
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+// 		Initialize strings related to the Difference Cursors.
+//		Load the PAV file associated with the last view page (if any).
+//		Add custom buttons to the PA.
+//		Update the state of the custom buttons.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_SamplePageLoad()
+
+	msDiffCursor1Name	= StrToLocalText("@(Diff Cursor 1)");
+	msDiffCursor2Name	= StrToLocalText("@(Diff Cursor 2)");
+	msDiffColumnText	= StrToLocalText("@(Difference Cursor)");
+
+	mbDemoRunning = 0;
+	mbPavLoading = 1;
+	
+	OBJECT hAnalyst	= ObjectByName("CIT_PA");
+	CIT_PA_LoadContextPav(hAnalyst);
+	CIT_PA_ConfigureCustomButtons(hAnalyst);
+	CIT_PA_UpdateCustomButtons(hAnalyst);
+	
+	mbPavLoading = 0;
+	
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						E_CIT_PA_HorizontalAxisChanged()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler called when the PA Horizontal (time) axis is moved for a particular Pen.
+//				
+// 		ARGUMENTS:
+//
+//			hThis - a handle to the PA object
+//			hPen  - a handle to the Pen which has had its axis moved.
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		IF Difference Cursors are Enabled
+//			Update the Difference Cursor Column
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION 
+E_CIT_PA_HorizontalAxisChanged(OBJECT hThis, OBJECT hPen)
+
+	INT bDiffCursorsEnabled = 0;
+	
+	IF mbPavLoading = 0 THEN	
+		bDiffCursorsEnabled = CIT_PA_GetCommandPressedState(hThis, msDiffCursorsID);
+		
+		IF bDiffCursorsEnabled <> 0 THEN
+			CIT_PA_UpdateDifferenceCursorColumn(hThis);
+		END
+	END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						E_CIT_PA_CursorMoved()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler called when a PA Cursor has moved.
+//				
+// 		ARGUMENTS:
+//
+//			hThis 	- a handle to the PA object
+//			hCursor	- a handle to the Cursor which has moved.
+//			nPosition - The new position
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		IF Difference Cursors are Enabled
+//			Update the Difference Cursor Column
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION 
+E_CIT_PA_CursorMoved(OBJECT hThis, OBJECT hCursor, INT nPosition)
+
+	INT bDiffCursorsEnabled = 0;
+	
+	IF mbPavLoading = 0 THEN	
+		bDiffCursorsEnabled = CIT_PA_GetCommandPressedState(hThis, msDiffCursorsID);
+		
+		IF bDiffCursorsEnabled <> 0 THEN
+			CIT_PA_UpdateDifferenceCursorColumn(hThis);
+		END
+	END
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						E_CIT_PA_CommandExecuted()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler called when a PA Command is Executed.
+//			Note : PA Code associated with the command has already been called.
+//				
+// 		ARGUMENTS:
+//
+//			hThis 	- a handle to the PA object
+//			nCommandId - The ID for the command that was executed
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		SWITCH CommandID
+//			CASE New PAV was Loaded
+//				Add and configure custom buttons to the PA
+//			CASE Trend Group custom button pressed
+//				Executed code to choose pane and group
+//			CASE Play Demo custom button pressed
+//				Start the Demo
+//			CASE Stop Demo custom button pressed
+//				Stop the Demo
+//			CASE Difference Cursors custom button pressed
+//				Toggle the difference cursor function
+//		END
+//	
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION 
+E_CIT_PA_CommandExecuted(OBJECT hThis, STRING sCommandId)
+
+	SELECT CASE sCommandId
+	
+	CASE StandardCommands_LoadConfig_ID 
+		CIT_PA_ConfigureCustomButtons(hThis);
+		CIT_PA_UpdateCustomButtons(hThis);
+		
+	CASE msPlayDemoID 
+		CIT_PA_StartDemo(hThis);
+		
+	CASE msStopDemoID 
+		CIT_PA_StopDemo(hThis);
+		
+	CASE msDiffCursorsID 
+		CIT_PA_ToggleDifferenceCursors(hThis);
+		
+	END SELECT 
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_ToggleDifferenceCursors()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Toggle the difference cursor functionality
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			INT - Non Zero if the difference cursors are on else zero
+//
+//		PSEUDO CODE:
+//
+//			Get state of the Difference Cursor Button
+//			IF NOT Button Pressed THEN
+//				Remove the difference cursors
+//			ELSE
+//				Add the two difference cursors
+//				Add the "Difference" column
+//				Turn PA cursors on (make visible)
+//			END
+//
+//			NOTE : "Difference" Column cannot currently be removed (List View
+//					Interface does not support it).
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+INT
+FUNCTION
+CIT_PA_ToggleDifferenceCursors(OBJECT hAnalyst)
+
+	OBJECT hCursors = _ObjectGetProperty(hAnalyst, "Cursors");
+	INT bDiffCursorsEnabled = CIT_PA_GetCommandPressedState(hAnalyst, msDiffCursorsID);
+	
+	IF bDiffCursorsEnabled = 0 THEN
+		
+		CIT_PA_RemoveDifferenceCursors(hCursors);	
+		CIT_PA_RemoveDifferenceCursorColumn(hAnalyst);		
+	ELSE
+		CIT_PA_AddDifferenceCursors(hCursors);	
+		CIT_PA_AddDifferenceCursorColumn(hAnalyst);
+		CIT_PA_ShowCursors(hAnalyst);
+	END
+
+	RETURN bDiffCursorsEnabled;
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_RemoveDifferenceCursors()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Remove difference cursors functionality
+//				
+// 		ARGUMENTS:
+//
+//			hCursors	- a handle to the PA cursors collection
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Resolve difference cursors by name and delete them
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_RemoveDifferenceCursors(OBJECT hCursors)
+
+	ErrSet(1);
+	IsError();
+	
+	OBJECT hDiffCursor1;
+	OBJECT hDiffCursor2;
+	
+	hDiffCursor1 = _ObjectCallMethod(hCursors, "get_ItemByName", msDiffCursor1Name);
+
+	IF IsError() = 0 THEN
+		_ObjectCallMethod(hDiffCursor1, "Delete");
+	END
+
+	hDiffCursor2 = _ObjectCallMethod(hCursors, "get_ItemByName", msDiffCursor2Name);
+
+	IF IsError() = 0 THEN
+		_ObjectCallMethod(hDiffCursor2, "Delete");
+	END
+	
+	IsError();
+	ErrSet(0);
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_AddDifferenceCursors()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Adds difference cursors (2)
+//				
+// 		ARGUMENTS:
+//
+//			hCursors	- a handle to the PA cursors collection
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Create difference cursors with predefined names
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_AddDifferenceCursors(OBJECT hCursors)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT hDiffCursor1 = _ObjectCallMethod(hCursors, "Create", msDiffCursor1Name, 100);
+	OBJECT hDiffCursor2 = _ObjectCallMethod(hCursors, "Create", msDiffCursor2Name, 200);
+
+	IsError();
+	ErrSet(0);
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_AddDifferenceCursorColumn()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Add difference cursors List View Column
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Create "Difference" List View Column with predefined name
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_AddDifferenceCursorColumn(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT hObjectView 			= _ObjectGetProperty(hAnalyst, "ObjectView");
+	OBJECT hObjectViewColumns 	= _ObjectGetProperty(hObjectView , "Columns");
+	_ObjectCallMethod(hObjectViewColumns , "Add", msDiffColumnName, msDiffColumnText, 130);
+	
+	IsError();
+	ErrSet(0);
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_RemoveDifferenceCursorColumn()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Remove difference cursors List View Column
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_RemoveDifferenceCursorColumn(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT hObjectView 			= _ObjectGetProperty(hAnalyst, "ObjectView");
+	OBJECT hObjectViewColumns 	= _ObjectGetProperty(hObjectView , "Columns");
+	_ObjectCallMethod(hObjectViewColumns , "Remove", msDiffColumnName);
+	
+	IsError();
+	ErrSet(0);
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_UpdateDifferenceCursorColumn()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Updates difference cursors List View column
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Create "Difference" List View Column with predefined name
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_UpdateDifferenceCursorColumn(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT 	hObjectView;
+	OBJECT 	hObjectViewPaneItems;
+	OBJECT 	hObjectViewPenItems;
+	OBJECT 	hObjectViewItem;
+
+	OBJECT 	hPanes;
+	OBJECT 	hPane;
+	INT		nPaneCount;	
+	INT		nPaneIter;
+
+	OBJECT 	hPens;
+	OBJECT 	hPen;
+	INT		nPenCount;	
+	INT		nPenIter;
+	
+	OBJECT	hCursors;
+	OBJECT	hDiffCursor1;
+	OBJECT	hDiffCursor2;
+
+	INT		bLocalTime = -1;
+	REAL	rTimeValue;
+	INT		nMillisecondValue;
+	STRING	sDiffCursor1Val;
+	STRING	sDiffCursor2Val;
+	REAL	rDiffCursor1Val;
+	REAL	rDiffCursor2Val;
+	STRING	sCursorDifference;
+		
+	// Retrieve the Object View
+	hObjectView = _ObjectGetProperty(hAnalyst, "ObjectView");
+	hObjectViewPaneItems = _ObjectGetProperty(hObjectView , "Items");
+	
+	// Retrieve the panes
+	hPanes		= _ObjectGetProperty(hAnalyst, "Panes");
+	nPaneCount	= _ObjectGetProperty(hPanes, "Count");
+	
+	// Get the difference cursors
+	hCursors	 = _ObjectGetProperty(hAnalyst, "Cursors");
+	hDiffCursor1 = _ObjectCallMethod(hCursors, "get_ItemByName", msDiffCursor1Name );
+	hDiffCursor2 = _ObjectCallMethod(hCursors, "get_ItemByName", msDiffCursor2Name );
+	
+	// Cannot continue without the OV, panes or cursors
+	IF IsError() <> 0 THEN
+		RETURN;
+	END
+	
+	FOR nPaneIter = 1 TO nPaneCount DO
+	
+		// Get object view Item and sub Items collection corresponing to this Pane
+		hObjectViewItem		= _ObjectCallMethod(hObjectViewPaneItems, "get_Item", nPaneIter);
+		hObjectViewPenItems	= _ObjectGetProperty(hObjectViewItem, "Items");
+		
+		// Get the Pens collection (and count)  corresponding to this pane
+		hPane 				= _ObjectCallMethod(hPanes, "get_Item", nPaneIter);
+		hPens				= _ObjectGetProperty(hPane , "Pens");
+		nPenCount			= _ObjectGetProperty(hPens , "Count");
+		
+		FOR nPenIter = 1 TO nPenCount DO
+		
+			// Get the matching Pen Item and ListView sub-item pair
+			hPen 			= _ObjectCallMethod(hPens, "get_Item", nPenIter );
+			hObjectViewItem	= _ObjectCallMethod(hObjectViewPenItems, "get_Item", nPenIter );
+			
+			IF IsError() = 0 THEN
+			
+				// Get diff cursor values for this pen
+				_ObjectCallMethod(hDiffCursor1, "GetValue", hPen, bLocalTime, rTimeValue, nMillisecondValue, sDiffCursor1Val);
+				_ObjectCallMethod(hDiffCursor2, "GetValue", hPen, bLocalTime, rTimeValue, nMillisecondValue, sDiffCursor2Val);
+				
+				IF IsError() = 0 THEN
+					
+					// Calculate difference and update the List View item
+					rDiffCursor1Val = StrToReal(sDiffCursor1Val);
+					rDiffCursor2Val = StrToReal(sDiffCursor2Val);
+					sCursorDifference = RealToStr(rDiffCursor2Val - rDiffCursor1Val, 15, 5)
+
+					_ObjectCallMethod(hObjectViewItem, "PutField", msDiffColumnName, sCursorDifference);
+					
+				END
+			END
+		END
+	END			
+
+	IsError();
+	ErrSet(0);
+END
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_GetCommandPressedState()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Gets the pressed state of a command (and its button(s))
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			nCommandId	- ID of the command in question
+//			
+//     	RETURNED VALUE: 
+//
+//			Non-Zero if state is pressed else zero
+//
+//		PSEUDO CODE:
+//
+//		Get the command reference from the Command System
+//		Get the "Pressed" attribute from the command
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+INT 
+FUNCTION
+CIT_PA_GetCommandPressedState(OBJECT hAnalyst, STRING sCommandId)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT	hCommandSystem 			= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	OBJECT	hToggleCursorCommand	= _ObjectCallMethod(hCommandSystem, "get_ItemById", sCommandId);
+	INT		bPressedState = 0;
+	
+	IF IsError() = 0 THEN
+		bPressedState = _ObjectGetProperty(hToggleCursorCommand, "Pressed");
+	END
+
+	RETURN bPressedState;
+
+	IsError();
+	ErrSet(0);
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_ShowCursors()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Make PA Cursors visible
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Get the command reference from the Command System
+//		Get the "ToggleCursorCommand" command object
+//		IF Command is NOT Pressed
+//			Execute the command
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_ShowCursors(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT	hCommandSystem 			= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	OBJECT	hToggleCursorCommand	= _ObjectCallMethod(hCommandSystem, "get_ItemById", StandardCommands_ToggleCursorVisibility_ID);
+	
+	INT		bCursorsVisible = -1;
+	bCursorsVisible = _ObjectGetProperty(hToggleCursorCommand, "Pressed");
+	
+	IF bCursorsVisible = 0 THEN
+		_ObjectCallMethod(hCommandSystem, "Execute", StandardCommands_ToggleCursorVisibility_ID);
+	END
+
+	IsError();
+	ErrSet(0);
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_StartDemo()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Start Example Project PA Demo Mode
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		IF Demo NOT running THEN
+//			Start task that runs demo
+//		END
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_StartDemo(OBJECT hAnalyst)
+
+	IF TaskHnd("CIT_PA_CycleDemoPAVFiles") = -1 THEN 
+		mbDemoRunning = -1;
+		TaskNew("CIT_PA_CycleDemoPAVFiles","", 1);
+	END
+
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_StopDemo()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Stop Example Project PA Demo Mode
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		IF Demo IS running THEN
+//			Stop task that runs demo
+//			Reload current PAV file (restores standard buttons)
+//			Add Custom Buttons back on and update their state
+//		END
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_StopDemo(OBJECT hAnalyst)
+
+	STRING sPavName;
+	
+	IF TaskHnd("CIT_PA_CycleDemoPAVFiles") <> -1 THEN 
+		mbDemoRunning = 0;
+		TaskKill(TaskHnd("CIT_PA_CycleDemoPAVFiles"));
+		sPavName = msDemoPAVs[mnCurrentPavIndex];
+		CIT_PA_LoadPavFile(hAnalyst, sPavName);
+		CIT_PA_ConfigureCustomButtons(hAnalyst);
+		CIT_PA_UpdateCustomButtons(hAnalyst);
+	END
+
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_CreateMainToolbarButton()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Create a new toolbar command and button
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			sCommandId	- ID for the command behind the button
+//			sButtonName - name (tooltip) for the button
+//			sIconName	- Icon name for the button
+//			eButtonType - Button type (toggle/push)
+//			
+//     	RETURNED VALUE: 
+//
+//			STRING- Command ID behind the new button or "" if unsuccessful
+//
+//		PSEUDO CODE:
+//
+//		NOTE: Icon Name must not contain path, but this icon MUST exist in the 
+//		current project directory ([RUN]) in order for this to succeed.
+//
+//		Obtain a reference to the CommandSystem
+//		Construct the Full IconPath	
+//		IF Icon Exists THEN
+//			Create Command with Name, button type and Icon
+//			Get the command ID
+//			Add a button to the main toolbar bound to this command
+//		END
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+STRING
+FUNCTION
+CIT_PA_CreateMainToolbarButton(OBJECT hAnalyst, STRING sCommandId, STRING sButtonName, STRING sIconName, INT eButtonType)
+
+	ErrSet(1);
+	IsError();
+	
+	OBJECT	hCommandSystem 	= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	OBJECT	hCommand;
+	
+	IF IsError() = 0 THEN
+		sIconName	= PathToStr("[RUN]:") + sIconName;
+		
+		IF FileExist(sIconName) THEN
+			hCommand	= _ObjectCallMethod(hCommandSystem, "Create", sCommandId, eButtonType, sButtonName, sIconName, 0);
+			sCommandId	= _ObjectGetProperty(hCommand, "CommandId");
+			
+			IF IsError() = 0 THEN
+				sCommandId = CIT_PA_AddCommandToMainToolbar(hAnalyst, sCommandId);
+			END
+		END
+	END
+
+	IsError();
+	ErrSet(0);
+
+	RETURN sCommandId;
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_AddCommandToMainToolbar()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Create a new toolbar button based on a command
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst	- a handle to the PA Object
+//			sCommandID	- ID of the command behind button
+//			
+//     	RETURNED VALUE: 
+//
+//			STRING - Command ID behind the new button
+//
+//		PSEUDO CODE:
+//
+//		Get Main Toolbar Buttons collection
+//		Call "Add" on the Buttons collection to add a button
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+STRING
+FUNCTION
+CIT_PA_AddCommandToMainToolbar(OBJECT hAnalyst, STRING sCommandID)
+	
+	ErrSet(1);
+	IsError();
+	
+	OBJECT hToolbars 		= _ObjectGetProperty(hAnalyst, "Toolbars");
+	OBJECT hMainToolbar 	= _ObjectCallMethod(hToolbars, "get_Item", 1);
+	OBJECT hButtons		 	= _ObjectGetProperty(hMainToolbar , "Buttons");
+
+	_ObjectCallMethod(hButtons, "Add", sCommandID);
+	IF IsError() = 0 THEN
+		ErrSet(0);
+		RETURN sCommandID;
+	END
+
+	IsError();
+	ErrSet(0);
+	RETURN "";
+	
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_CycleDemoPAVFiles()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Main loop of the Demo Mode Task
+//				
+// 		ARGUMENTS:
+//
+//			None
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		WHILE (ALWAYS)
+//			Decide which PAV to load (based on counter)
+//			Load the PAV file
+//			Remove all Main Toolbar buttons (lock down PA)
+//			Remove the PA Context Menu (lock down menu)
+//			Configure and Update Custom buttons
+//			increment page counter
+//			Sleep (for cycle period)			
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_CycleDemoPAVFiles()
+
+	INT nPageCounter = 0;
+	INT nPavIndex = 0;
+	STRING sPavName; 
+	OBJECT hAnalyst	= ObjectByName("CIT_PA");
+	
+	WHILE(1) DO
+		ErrSet(1);
+		IsError();
+		nPavIndex = nPageCounter MOD mnDemoPAVCount;
+		mnCurrentPavIndex = nPavIndex;
+		sPavName = msDemoPAVs[nPavIndex];
+		CIT_PA_LoadPavFile(hAnalyst, sPavName);
+		CIT_PA_RemoveMainToolbarButtons(hAnalyst);
+		CIT_PA_RemoveContextMenu(hAnalyst);
+		CIT_PA_ConfigureCustomButtons(hAnalyst);
+		CIT_PA_UpdateCustomButtons(hAnalyst);
+		IsError();
+		ErrSet(0);
+		nPageCounter = nPageCounter + 1;
+		SleepMS(mnDemoCycleInterval);
+	END
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_LoadPavFile()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Load a PAV file into the Process Analyst
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst - a reference to the PA object
+//			sPavName - Name of the PAV file to load
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION 
+CIT_PA_LoadPavFile(OBJECT hAnalyst, STRING sPavName)
+	
+	ErrSet(1);
+	mbPavLoading = 1;
+	_ObjectCallMethod(hAnalyst, "LoadFromFile", sPavName , 0);
+	mbPavLoading = 0;
+	
+	IsError();
+	ErrSet(0);
+
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_RemoveMainToolbarButtons()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Remove all buttons from the main toolbar and any custom commands
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst - a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION 
+CIT_PA_RemoveMainToolbarButtons(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT hCommandSystem 		= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	OBJECT hToolbars 		= _ObjectGetProperty(hAnalyst, "Toolbars");
+	OBJECT hMainToolbar 	= _ObjectCallMethod(hToolbars, "get_Item", 1);
+	OBJECT hButtons		 	= _ObjectGetProperty(hMainToolbar , "Buttons");
+	
+	_ObjectCallMethod(hButtons, "RemoveAll");
+	_ObjectCallMethod(hCommandSystem , "Remove", msPlayDemoID);
+	_ObjectCallMethod(hCommandSystem , "Remove", msStopDemoID);
+	_ObjectCallMethod(hCommandSystem , "Remove", msDiffCursorsID);
+
+	IsError();
+	ErrSet(0);
+END	
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_RemoveContextMenu()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Disable the context menu on the PA
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst - a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION CIT_PA_RemoveContextMenu(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+
+	_ObjectSetProperty(hAnalyst, "ContextMenu", 0);
+	
+	IsError();
+	ErrSet(0);
+END	
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_UpdateCustomButtons()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Updates the enabled state of Example Project custom buttons
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst - a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_UpdateCustomButtons(OBJECT hAnalyst)
+	ErrSet(1);
+	IsError();
+	
+	OBJECT	hCommandSystem 	= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	
+	IF IsError() = 0 THEN
+		IF mbDemoRunning THEN
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msDiffCursorsID, 0);
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msPlayDemoID , 0);
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msStopDemoID , 1);
+		ELSE
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msDiffCursorsID, 1);
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msPlayDemoID , 1);
+			CIT_PA_UpdateCustomCommandStatus(hCommandSystem, msStopDemoID , 0);
+		END
+	END
+	
+	IsError();
+	ErrSet(0);
+END
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_UpdateCustomCommandStatus()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Set the enable/disabled state of an custom command
+//				
+// 		ARGUMENTS:
+//
+//			hCommandSystem 	- a reference to the PA Command System object
+//			nCommandID		- the ID of the command to update
+//			bEnabled		- the new state of the command
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_UpdateCustomCommandStatus(OBJECT hCommandSystem, STRING sCommandID, INT bEnabled)
+
+	ErrSet(1);
+	IsError();
+	
+	OBJECT	hCommand;
+	hCommand	= _ObjectCallMethod(hCommandSystem, "get_ItemById", sCommandID);
+
+	IF IsError() = 0 THEN
+		_ObjectSetProperty(hCommand, "Enabled", bEnabled);
+	END
+
+	IsError();
+	ErrSet(0);
+END
+	
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_CustomCommandExists()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Check if a custom commandexists based on the tooltip
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst		- a reference to the PA object
+//			sButtonTooltip	- the tooltip text for the button
+//			
+//     	RETURNED VALUE: 
+//
+//			Command ID if the command exists else ""
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+STRING
+FUNCTION
+CIT_PA_CustomCommandExists(OBJECT hAnalyst, STRING sCommandTooltip)
+
+	ErrSet(1);
+	IsError();
+
+	OBJECT	hCommandSystem 	= _ObjectGetProperty(hAnalyst, "CommandSystem");
+	INT		nCommandCount	= _ObjectGetProperty(hCommandSystem , "Count");
+	INT 	nCommandIter	= 0;
+	OBJECT	hCommand;
+	STRING	sCurrentTooltip;
+	STRING	sCurrentId;
+	
+	IF IsError() = 0 THEN
+		FOR nCommandIter = 1 TO nCommandCount DO
+			hCommand = _ObjectCallMethod(hCommandSystem , "get_Item", nCommandIter);
+			IF IsError() = 0 THEN
+				sCurrentTooltip = _ObjectGetProperty(hCommand, "Tooltip");
+				sCurrentId = _ObjectGetProperty(hCommand, "CommandId");
+				IF (IsError() = 0) AND (sCurrentTooltip = sCommandTooltip) THEN
+					ErrSet(0);
+					RETURN sCurrentId;
+				END
+			END
+		END
+	END
+
+	IsError();
+	ErrSet(0);
+	
+	RETURN "";
+END
+
+	
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_ConfigureCustomButtons()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Add a seperator and Example custom buttons to the main toolbar
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst- a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_ConfigureCustomButtons(OBJECT hAnalyst)
+
+	msDiffCursorsID = CIT_PA_CustomCommandExists(hAnalyst, StrToLocalText("@(Difference Cursor)"));
+	IF msDiffCursorsID = "" THEN
+		CIT_PA_AddCommandToMainToolbar(hAnalyst, "Citect_Command_Separator");
+		msDiffCursorsID = CIT_PA_CreateMainToolbarButton(hAnalyst, "CSV_DifferenceCursor", StrToLocalText("@(Difference Cursor)"), "DifferenceCursors.ico", 1);
+	END
+
+	msPlayDemoID = CIT_PA_CustomCommandExists(hAnalyst, StrToLocalText("@(Play Demo)"));
+	IF msPlayDemoID = "" THEN
+		msPlayDemoID = CIT_PA_CreateMainToolbarButton(hAnalyst, "CSV_PlayDemo", StrToLocalText("@(Play Demo)"), "PlayDemo.ico", 0);
+	END
+
+	msStopDemoID = CIT_PA_CustomCommandExists(hAnalyst, StrToLocalText("@(Stop Demo)"));
+	IF msStopDemoID = "" THEN
+		msStopDemoID = CIT_PA_CreateMainToolbarButton(hAnalyst, "CSV_StopDemo", StrToLocalText("@(Stop Demo)"), "StopDemo.ico", 0);
+	END
+END
+
+	
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_LoadContextPav()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Load PAV corresponding to previous page
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst- a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		Find last page name
+//		Add ".pav" to the end of this name
+//		Open the corresponding PAV file if it exists
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_LoadContextPav(OBJECT hAnalyst)
+
+	STRING sLastPage;
+	STRING sViewFile;
+	
+	sLastPage = PagePeekLast(0);
+	
+	IF  sLastPage <> "" THEN
+		IF StrSearch(0, sLastPage, "Alarm") <> -1 THEN
+			sViewFile = msAlarmsPav;
+		ELSE
+			sViewFile = sLastPage + ".pav";
+		END
+		
+		ErrSet(1);
+		
+		_ObjectCallMethod(hAnalyst, "LoadFromFile", sViewFile, 0);
+		
+		IF IsError() <> 0 THEN
+			_ObjectCallMethod(hAnalyst, "LoadFromFile", msDefaultPav, 0);
+		END
+		
+		IsError();
+		ErrSet(0);
+	END
+END
+	
+		
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//						CIT_PA_ConfigurePageStyle()
+//
+//		REV	DATE		WHO			DESCRIPTION
+//		0	
+//
+//     	GENERAL DESCRIPTION
+//
+//			Add a seperator and Example custom buttons to the main toolbar
+//				
+// 		ARGUMENTS:
+//
+//			hAnalyst- a reference to the PA object
+//			
+//     	RETURNED VALUE: 
+//
+//			None
+//
+//		PSEUDO CODE:
+//
+//		NOTE: This is not used as part of the Example project functionality, however it is an example
+//		of how the general appearance of the Process Analyst may be changed
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+FUNCTION
+CIT_PA_ConfigurePageStyle(OBJECT hAnalyst)
+
+	ErrSet(1);
+	IsError();
+	
+	OBJECT 	hObjectView;
+	OBJECT 	hPanes;
+	OBJECT 	hPane;
+	INT		nPaneCount;	
+	INT		nPaneIter;
+
+	// Background color of the chart
+	_ObjectSetProperty(hAnalyst, "BackgroundColor", PackedRGB(0, 43, 85));
+	
+	// Background color of the Object View
+	hObjectView = _ObjectGetProperty(hAnalyst, "ObjectView");
+	_ObjectSetProperty(hObjectView , "BackgroundColor", PackedRGB(128,191,255));
+	
+	// Background color of the panes
+	hPanes		= _ObjectGetProperty(hAnalyst, "Panes");
+	nPaneCount	= _ObjectGetProperty(hPanes, "Count");
+	
+	FOR nPaneIter=1 TO nPaneCount DO
+		hPane = _ObjectCallMethod(hPanes, "get_Item", nPaneIter);
+		_ObjectSetProperty(hPane , "BackgroundColor", PackedRGB(0, 43, 85));
+	END
+
+END
+
+

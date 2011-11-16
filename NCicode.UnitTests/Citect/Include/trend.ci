@@ -1,0 +1,1777 @@
+/*
+**	FILE:	trend.ci
+**
+**	AUTHOR:	Martin Roberts
+**
+**	DATE:	March 1992
+**
+**	REVISION:
+**
+**	1.0	First revision for release 1.0.
+**	3.0     Additions to support new style templates
+**
+**	NOTES:
+**
+**	Support for pre version 3.0 syle trends:
+**
+**	This file contains the default trend functions. These functions
+**	animate the trend elements on the display and process the buttons
+**	and commands.
+**
+**	These functions all assume a fixed order for the animation numbers.
+**	The trend starts at an 40,80,120 or 160 and all the trend elements
+**	are at the same offset from the base. Eg the low scale is at an 41,
+**	81, 121 or 161. The following offsets are used.
+**
+**		0	The graphic trend.
+**		1..5	scale 0%, scale 25%, scale 50%, scale 75%, scale 100%
+**		6	scale units
+**		7	start date
+**		8	start time
+**		9	period
+**		10	end date
+**		11	end time
+**		12..15	Trend scroll buttons <<, <, >, >>
+**		16	'timebase' string
+**		17	'Pen' string
+**		18	The focus pen name
+**		19..23	Trend cursor buttons <<, <, >, >>, off
+**		24	'value' string
+**		25	The focus pen cursor value
+**		26	'time' string
+**		27	The focus pen cursor time
+**		28	The mode of the trend
+**		29	Boundary of trend region, used to position cursor.
+**
+**	Four types of trends are supported:
+**
+**	SingleTrend
+**		The single trend is one large trend on a full size page.
+**		This trend has 5 scales, 2 time and dates, scroll and
+**		cursor buttons and cursor display.
+**
+**	DoubleTrend
+**		The double trend has two trends on a full size page.
+**		It has the same elements as SingleTrend except it has only
+**		3 scales.
+**
+**	QuadTrend
+**		The quad trend has four trends on a full size page.
+**		The quad trend has 3 scales 2 times, scroll buttons.
+**
+**	WindowTrend
+**		The window trend has one trend on a window size pape.
+**		The window trend has the same elements as the quad trend.
+**
+**
+**	Support for version 3.0 style trends:
+**
+**		Trends are now supported by a flexible set of functions.
+**		There are no predefined An allocations making customizsed
+**		trend pages simple to configure.
+**
+**	
+**
+*/
+
+/* global defines */
+
+INT	TRN_PAGE_NORMAL		= 0; 
+INT	TRN_PAGE_COMPARE 	= 1;
+
+/* global variables */
+
+	INT	hButtonFont;		/* button font handle		*/
+	INT	hTrendFont;		/* trend font handle		*/
+	INT	hTrendHistFont;		/* history trend font handle	*/
+	INT	hPenArray[8];		/* trend pen fonts		*/
+	INT	hCurMouseAN;		/* cursor mouse an		*/
+	INT	nTrendCursorMode;	/* 0 => cursor, 1 => rubber box */
+
+
+        INT     CTSPBuffer;
+        STRING  CTSVBuffer;
+        INT     hCTSTrendAN;
+        INT     hCTSForm = -1;
+
+/* 
+**	trend page instance offsets 
+*/
+
+	INT	STATS_PAGE_WND_HND	= 10;
+	INT	STATS_TASK_HND		= 11;   
+
+	INT	SPC_PAGE		= 9;
+	INT	SPC_TIME		= 14;
+	INT	TRN_AN			= 12;
+	INT	TRN_PAGE_TYPE		= 13;
+	
+/************************************************************************/
+/*									*/
+/*			Page AN Functions				*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		TrnPageAnGet
+**		TrnPageAnSet
+**		TrnPageTypeSPCGet
+**		TrnPageTypeSPCSet
+**		TrnPageTimeSPCGet
+**		TrnPageTimeSPCSet
+**		TrnPageTypeGet
+**		TrnPageTypeSet
+**
+/************************************************************************/
+
+/*
+**	The following two functions store and retrieve the An on which the 
+**	trend on the current page is configured. NOTE: only SPC pages currently. 
+*/
+
+INT	FUNCTION TrnPageAnGet() RETURN PageGetInt(TRN_AN); END
+	FUNCTION TrnPageAnSet(INT AN) PageSetInt(TRN_AN, AN); END
+
+
+/*
+**	The following two functions store and retrieve the trend type which is 
+**	displayed on the current page. 1 - SPC trend, 0 - Normal trend 
+*/
+
+INT	FUNCTION TrnPageTypeSPCGet() RETURN PageGetInt(SPC_PAGE); END
+	FUNCTION TrnPageTypeSPCSet(INT nMode) PageSetInt(SPC_PAGE, nMode); END
+
+/*
+**	The following two functions store and retrieve the current end time  
+**	displayed on the current page. 
+*/
+
+INT	FUNCTION TrnPageTimeSPCGet() RETURN PageGetInt(SPC_TIME); END
+	FUNCTION TrnPageTimeSPCSet(INT Time) PageSetInt(SPC_TIME, Time); END
+
+/*
+**	The following two functions store and retrieve the trend page type which  
+**	indicates if the page is not a normal trend page. Valid values are:
+**		TRN_PAGE_NORMAL 
+**		TRN_PAGE_COMPARE 
+*/
+
+INT	FUNCTION TrnPageTypeGet() RETURN PageGetInt(TRN_PAGE_TYPE); END
+	FUNCTION TrnPageTypeSet(INT PageType) PageSetInt(TRN_PAGE_TYPE, PageType); END
+
+/************************************************************************/
+
+/*
+**	FUNCTION NAME:	_TrendInit
+**
+**	This function is called at startup to initialize any variables
+**	used by default trend functions. It gets font handles for all
+**	the fonts used by the trend display functions.
+**
+*/
+
+FUNCTION
+_TrendInit()
+	INT	i;
+
+	FOR i = 0 TO 7 DO
+		hPenArray[i] = DspFontHnd("Pen" + (i + 1):# + "TrendFont");
+	END
+	hTrendFont = DspFontHnd("TrendFont");
+	hTrendHistFont = DspFontHnd("TrendHistFont");
+	hButtonFont = DspFontHnd("ButtonFont");
+END
+
+
+
+/*
+**	FUNCTION NAME:	_DefaultTrend
+**
+**	This is called if the trend type field is left blank. This
+**	function will try to call the correct trend function by using
+**	the name of the background file. Note the error checking is
+**	disabled to stop hardware errors being generated from invalid
+**	trend data.
+*/
+
+FUNCTION
+DefaultTrend()
+	STRING	sName;
+        IF PageCicodeEnabled() THEN
+		sName = PageInfo(3);
+		IF sName = "TREND1" THEN
+			DspTrend1();
+		ELSE IF sName = "TREND2" THEN
+			DspTrend2();
+		ELSE IF sName = "TREND3" THEN
+			DspTrend3();
+		ELSE IF sName = "TREND3" THEN
+			DspTrend4();
+		END END END END
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	DspTrend1
+**
+**	This function displays the trend elements for the single trend.
+**	It displays cursor and scroll buttons. The default page buttons,
+**	5 trend scales, 2 time and dates and all the trend cursor data.
+**	This function should be called from the type type field of the
+**	graphic trend database.
+**
+*/
+
+FUNCTION
+DspTrend1()
+	int	hAn;
+	int	hPenFont;
+
+	hAn = DspGetAnCur();
+	hPenFont = hPenArray[TrnGetPenFocus(hAn) - 1];
+	_DspTrendButton(hAn, TRUE);
+	_DspTrendCursor(hAn);
+	_DspTrendTime(hAn, hPenFont, TRUE);
+	_DspTrendScale(hAn, hPenFont, TRUE);
+END
+
+
+/*
+**	FUNCTION NAME:	DspTrend2
+**
+**	This function displays the trend elements for the double trend.
+**	It displays cursor and scroll buttons. The default page buttons,
+**	3 trend scales, 2 time and dates and all the trend cursor data.
+**	This function should be called from the type type field of the
+**	graphic trend database.
+**
+*/
+
+FUNCTION
+DspTrend2()
+	int	hAn;
+	int	hPenFont;
+
+	hAn = DspGetAnCur();
+	hPenFont = hPenArray[TrnGetPenFocus(hAn) - 1];
+	_DspTrendButton(hAn, TRUE);
+	_DspTrendCursor(hAn);
+	_DspTrendTime(hAn, hPenFont, TRUE);
+	_DspTrendScale(hAn, hPenFont, FALSE);
+END
+
+
+/*
+**	FUNCTION NAME:	DspTrend3
+**
+**	This function displays the trend elements for the quad trend.
+**	It displays scroll buttons. The default page buttons,
+**	3 trend scales, 2 times and all the trend cursor data.
+**	This function should be called from the type type field of the
+**	graphic trend database.
+**
+*/
+
+FUNCTION
+DspTrend3()
+	int	hAn;
+	int	hPenFont;
+
+	hAn = DspGetAnCur();
+	hPenFont = hPenArray[TrnGetPenFocus(hAn) - 1];
+	_DspTrendButton(hAn, FALSE);
+	_DspTrendCursor(hAn);
+	_DspTrendTime(hAn, hPenFont, FALSE);
+	_DspTrendScale(hAn, hPenFont, FALSE);
+END
+
+
+
+/*
+**	FUNCTION NAME:	DspTrend4
+**
+**	Display the  Quad Trend.
+**
+*/
+
+FUNCTION
+DspTrend4()
+	DspTrend3();
+END
+
+
+/*
+**	FUNCTION NAME:	_DspTrendScale
+**
+**	This function displays the trend scales and units. It allways
+**	displays 3 scales and if bShowAll is set will display 5 scales.
+**	The font used is the same colour as the pen in focus. The scales
+**	are assumes to be on ans offsets 1..5.
+*/
+
+FUNCTION
+_DspTrendScale(INT hAn, INT hFont, INT bShowAll)
+
+	DspText(hAn + 1, hFont, TrnGetScaleStr(hAn, 0,   0, 0));
+	DspText(hAn + 3, hFont, TrnGetScaleStr(hAn, 0,  50, 0));
+	DspText(hAn + 5, hFont, TrnGetScaleStr(hAn, 0, 100, 0));
+	DspText(hAn + 6, hButtonFont, TrnGetUnits(hAn, 0));
+
+	IF bShowAll THEN
+		DspText(hAn + 2, hFont, TrnGetScaleStr(hAn, 0, 25, 0));
+		DspText(hAn + 4, hFont, TrnGetScaleStr(hAn, 0, 75, 0));
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_DspTrendTime
+**
+**	This function displays the start and end times and if bShowDate
+**	is TRUE will display the start and end dates. Also displays the
+**	mode of the trend and the pen name.
+*/
+
+FUNCTION
+_DspTrendTime(INT hAn, INT hFont, INT bShowDate)
+	INT	StartTime;
+	INT	EndTime;
+	INT	Period;
+	INT     hTrnFont;
+
+	StartTime = TrnGetTime(hAn, 0, 0);
+	EndTime = TrnGetTime(hAn, 0, 100);
+	Period = TrnGetPeriod(hAn);
+
+	IF TrnGetMode(hAn, 0) THEN
+		DspText(hAn + 28, hButtonFont, "@(History)");
+		hTrnFont = hTrendHistFont;
+	ELSE
+		DspText(hAn + 28, hButtonFont, "@(RealTime)");
+		hTrnFont = hTrendFont;
+	END
+
+	DspText(hAn +  8, hTrnFont, TimeToStr(StartTime, 1));
+	DspText(hAn + 11, hTrnFont, TimeToStr(EndTime, 1));		
+	DspText(hAn +  9, hTrnFont, TimeToStr(Period, 5));
+
+	IF bShowDate THEN
+		DspText(hAn +  7, hTrnFont, TimeToStr(StartTime, 2));
+		DspText(hAn + 10, hTrnFont, TimeToStr(EndTime, 2));
+	END
+	DspText(hAn + 18, hFont, TrnGetPen(hAn, 0));
+END
+
+
+/*
+**	FUNCTION NAME:	_DspTrendCursor
+**
+**	This function displays the current value and time of the
+**	trend cursor.
+**	
+*/
+
+FUNCTION
+_DspTrendCursor(INT hAn)
+
+	int	hPenFont;
+
+	hPenFont = hPenArray[TrnGetPenFocus(hAn) - 1];
+
+	DspText(hAn + 24, hButtonFont, "@(Value)");
+!	DspText(hAn + 25, hTrendFont, TrnGetCursorValueStr(hAn, 0, 0));
+	DspText(hAn + 25, hPenFont, TrnGetCursorValueStr(hAn, 0, 0));
+	DspText(hAn + 26, hButtonFont, "@(Time)");
+!	DspText(hAn + 27, hTrendFont, TimeToStr(TrnGetCursorTime(hAn, 0), 1));
+	DspText(hAn + 27, hPenFont, TimeToStr(TrnGetCursorTime(hAn, 0), 1));
+END
+
+
+/*
+**	FUNCTION NAME:	_DspTrendButton
+**
+**	This function sets the buttons for controlling of the trend.
+**	It will display the buttons the first time it is called for
+**	the current page.
+**
+*/
+
+FUNCTION
+_DspTrendButton(INT hAn, INT bDspCursor = FALSE)
+	INT	height;
+
+	IF StrToInt(PageInfo(7)) = 0 THEN
+		DspPageButton();
+
+		IF bDspCursor THEN
+			height = 30;
+		ELSE
+			height = 18;
+		END;
+		DspButtonFn(hAn + 12, _TrendScroll, "<<", hButtonFont, 25, height);
+		DspButtonFn(hAn + 13, _TrendScroll, "<",  hButtonFont, 25, height);
+		DspButtonFn(hAn + 14, _TrendScroll, ">",  hButtonFont, 25, height);
+		DspButtonFn(hAn + 15, _TrendScroll, ">>", hButtonFont, 25, height);
+		DspText(hAn + 16, hButtonFont, "@(Timebase)");
+		DspButtonFn(hAn + 17, _TrendPen, "@(Pen)", hButtonFont, 30, 20);
+		
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_DN) + "]", 0, _EventCreateTrendMouseCursor);
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_UP) + "]", 0, _EventKillTrendMouseCursor);
+		KeySetSeq("######## ENTER", hAn + 1, _TrendScale);
+		KeySetSeq("######## ENTER", hAn + 5, _TrendScale);
+
+		KeySetSeq("ENTER", hAn + 7, _TrendTime);
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_UP) + "]", hAn + 7, _TrendTime);
+		KeySetSeq("ENTER", hAn + 8, _TrendTime);
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_UP) + "]", hAn + 8, _TrendTime);
+
+		KeySetSeq("######## ENTER", hAn + 9, _TrendPeriod);
+		KeySetSeq("################ ENTER", hAn + 18, _TrendTag);
+
+		IF bDspCursor = TRUE THEN
+			DspButtonFn(hAn + 19, _TrendCursor, "<<",  hButtonFont, 20, 20);
+			DspButtonFn(hAn + 20, _TrendCursor, "<",   hButtonFont, 20, 20);
+			DspButtonFn(hAn + 21, _TrendCursor, ">",   hButtonFont, 20, 20);
+			DspButtonFn(hAn + 22, _TrendCursor, ">>",  hButtonFont, 20, 20);
+			DspButtonFn(hAn + 23, _TrendCursor, "@(Off)", hButtonFont, 30, 20);
+		END
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_TrendScroll
+**
+**	This function is called when any of the trend scroll buttons
+**	are pressed. It will move the trend buffer in the required
+**	direction. Note that it assumes the buttons use the offsets
+**	12, 13, 14, 15.
+*/
+
+INT	TrnScrollArray[4] = -100, -50, 50, 100;
+
+INT
+FUNCTION
+_TrendScroll()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset, scroll;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40 - 12;
+		IF 0 <= offset AND offset < 4 THEN
+			scroll = TrnScrollArray[offset];
+			TrnScroll(hAn, -1, scroll);
+		END
+	END
+	
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_TrendCursor
+**
+**	This function is called when any of the trend cursor buttons
+**	are pressed. It will move the trend cursor in the required
+**	direction.
+*/
+
+INT	TrnCursorArray[4] = -10, -1, 1, 10;
+
+INT
+FUNCTION
+_TrendCursor()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset, samples;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40 - 19;
+		IF 0 <= offset AND offset < 4 THEN
+			samples = TrnCursorArray[offset];
+		ELSE
+			samples = 0;
+		END;
+		TrnSetCursor(hAn, samples);
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:	_TrendPen
+**
+**	This function is called when the PEN button is pressed.
+**	It will change the pen currently in focus to the next pen.
+**
+*/
+
+INT
+FUNCTION
+_TrendPen()
+	INT	hAnCursor;
+	INT	hAn;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		TrnSetPenFocus(hAn, -2);
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:	_TrendTag
+**
+**	This function is called when a new trend pen tag in entered.
+**
+*/
+
+INT
+FUNCTION
+_TrendTag()
+	INT	hAnCursor;
+	INT	hAn;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		TrnSetPen(hAn, 0, Arg1);
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:	_TrendScale
+**
+**	This function is called when a keyboard command is entered
+**	on one of the scales.
+**
+*/
+
+INT
+FUNCTION
+_TrendScale()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40;
+		IF offset = 1 THEN
+			TrnSetScale(hAn, 0, 0, Arg1);
+		ELSE IF offset = 5 THEN
+			TrnSetScale(hAn, 0, 100, Arg1);
+		END END;
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:	_TrendPeriod
+**
+**	This function is called when a keyboard command is entered
+**	on the trend period.
+**
+*/
+
+INT
+FUNCTION
+_TrendPeriod()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	period;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		period = StrToPeriod(Arg1);
+		TrnSetPeriod(hAn, period);
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_TrendTime
+**
+**	This function is called when a keyboard command is entered
+**	on the trend start time. It displays a form to get the time
+**	and data to scroll the trend.
+**
+*/
+INT	bNowTime;
+INT	hTimeForm = -1;
+
+INT
+FUNCTION
+_TrendTime()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	time;
+	STRING	sTime;
+	STRING	sDate;
+
+	IF hTimeForm >= 0 THEN
+		FormGoto(hTimeForm);
+		RETURN 0;
+	END
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+
+		bNowTime = FALSE;
+		time = TrnGetTime(hAn, 0, 0);
+		sTime = TimeToStr(time, 1);
+		sDate = TimeToStr(time, 2);
+
+		hTimeForm = FormNew("@(Trend Start Time)", 28, 4, 1);
+
+		FormInput(1, 0, "@(Time)" + ": ", sTime, 16);
+		FormInput(1, 1, "@(Date)" + ": ", sDate, 16);
+		FormButton( 1, 3, "  " + "@(OK)" + "  ", 0, 1);
+		FormButton(10, 3, "@(Cancel)", 0, 2);
+		FormButton(20, 3, " " + "@(Now)" + "  ", _TrendButtonNow,0);
+		
+		IF FormRead(0) = 0 THEN
+			time = StrToDate(sDate) + StrToTime(sTime);
+			IF (TrnSetTime(hAn, -1, time) = 274) THEN		// should be checking for all cases!
+				Prompt("Invalid Time/Date passed to TrnSetTime");
+			END
+		END;
+		hTimeForm = -1;
+
+		IF bNowTime THEN
+			IF TrnGetMode(hAn, 0) THEN
+				IF (TrnSetTime(hAn, -1, 0) = 274) THEN		// should be checking for all cases!
+					Prompt("Invalid Time/Date passed to TrnSetTime");
+				END
+
+			END
+		END
+	END
+
+	RETURN 0;
+END
+
+
+INT
+FUNCTION
+_TrendButtonNow()
+	INT	hForm;
+	INT	hField;
+
+	FormCurr(hForm, hField);
+	bNowTime = TRUE;
+	FormDestroy(hForm);
+	RETURN 0;
+END
+
+
+/*
+**
+**	The following trend functions do not rely on the definition of a
+**      specific set of An points. Many of the functions take the relevent trend
+**      An as an argument.
+**
+*/
+
+
+/*
+**	FUNCTION NAME:	TrendRun
+**
+**	Run continously from an advanced An on any trend page using 
+**	new templates.
+**
+*/
+
+INT
+FUNCTION
+TrendRun(INT PageType = TRN_PAGE_NORMAL)
+	IF StrToInt(PageInfo(7)) = 0 THEN
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_DN) + "]", 0, _EventCreateTrendMouseCursor);
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_UP) + "]", 0, _EventKillTrendMouseCursor);
+		nTrendCursorMode = 0;
+		TrendZoomInit();
+		PageSetInt(STATS_TASK_HND, BAD_HANDLE);
+		TrnPageTypeSet(PageType);
+
+	END
+	
+	return 0;
+END
+
+/*
+**	TrendGetAn
+**
+**	If the mouse is over a trend then return the trend An
+**	otherwise return zero.
+*/
+
+INT
+FUNCTION
+TrendGetAn()
+	INT	x;
+	INT	y;
+	INT	hAn;
+
+	DspGetMouse(x, y);
+	hAn = DspGetAnFromPoint(x, y);
+	IF hAn > 0 THEN
+		IF DspAnInfo(hAn, 0) = "6" THEN
+			RETURN hAn;
+		END
+	END
+	RETURN 0;
+END
+
+
+
+/*
+**  TrendIsPenFocus
+**
+**  Checks whether a pen is in focus on given trend.
+**  0 => Pen is not in focus.
+**  1 => Pen is in focus.
+**  2 => Pen is not configured.
+*/
+
+INT
+FUNCTION
+TrendIsPenFocus(INT hTrendAN, INT iPen)
+	STRING sTag;
+	
+	sTag = TrnGetPen(hTrendAN,iPen);
+	IF sTag <> "" THEN
+        	RETURN TrnGetPenFocus(hTrendAN) = iPen;
+	END
+	RETURN 2;
+END
+
+/*
+**	TrendSetScale
+**
+**	This function allows the operator to set any of the
+**	scale positions of the trend.
+*/
+
+INT
+FUNCTION 
+TrendSetScale(INT hTrendAN, INT iPercentage, STRING sValue = "")
+	STRING	sTitle;
+	STRING	sBox1 = "1";
+	STRING	sBox2 = "0";
+	STRING	sBuf;
+
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		sTitle = "@(New)" + " " + IntToStr(iPercentage) + "% " + "@(Scale Value)";
+		sValue = TrnGetScale(hTrendAN, 0, iPercentage);
+		sValue = FormNumPad(sTitle, sValue, (2+4+16));
+		
+		IF IsError() <> 299 THEN
+			IF sValue <> "" THEN
+
+                                CTSPBuffer = iPercentage;
+                                CTSVBuffer = sValue;
+                                hCTSTrendAN= hTrendAN;
+
+                                IF (hCTSForm <> -1) THEN
+									IF (NOT FormActive(hCTSForm)) THEN
+										hCTSForm = -1;
+									END
+                                END
+                                
+                                IF hCTSForm = -1 THEN
+        				hCTSForm = FormNew(sTitle, 26, 4, 24+128);
+        				FormField(2, 1, 24, 1, 4, sBuf, "&" + "@(All Trend Pens)", ChangeTrendScaleAllPens);
+	        			FormField(2, 2, 24, 1, 4, sBuf, "@(Current Trend &Pen)", ChangeTrendScaleCurrentPen);
+		        		FormField(2, 3, 24, 1, 6, sBuf, "&" + "@(Cancel)", ChangeTrendScaleCancel);
+
+			        	FormRead(1);
+                                END
+			END
+		END
+	ELSE
+		// Pass the last argument as a string to support exponential format
+		TrnSetScale(hTrendAN, 0, iPercentage, sValue);
+	END
+
+	return 0;
+END
+
+INT
+FUNCTION
+ChangeTrendScaleAllPens()
+
+	// Pass the last argument as a string to support exponential format
+	TrnSetScale(hCTSTrendAN, -1, CTSPBuffer, CTSVBuffer);
+        FormDestroy(hCTSForm);
+        hCTSForm = -1;
+        return 0;
+END
+
+INT
+FUNCTION
+ChangeTrendScaleCurrentPen()
+
+	// Pass the last argument as a string to support exponential format
+	TrnSetScale(hCTSTrendAN, 0, CTSPBuffer, CTSVBuffer);
+        FormDestroy(hCTSForm);
+        hCTSForm = -1;
+        return 0;
+END
+
+INT
+FUNCTION
+ChangeTrendScaleCancel()
+        FormDestroy(hCTSForm);
+        hCTSForm = -1;
+        return 0;
+END
+
+
+/*
+**	TrendSetTimebase
+**
+**	This function allows the operator to set the time
+**	interval between each sample.
+*/
+
+INT
+FUNCTION 
+TrendSetTimebase(INT hTrendAN, STRING sValue = "")
+
+	REAL	rPeriod;
+	INT	PosDecPoint;
+	STRING	sSecPortion;
+	STRING	sMSPortion;
+
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		sValue = TimeToStr(TrnGetPeriod(hTrendAn), 5);
+		sValue = FormNumPad("@(New Resolution)", sValue, (32));
+	END
+	IF IsError() <> 299 THEN
+		IF sValue <> "" THEN
+			PosDecPoint = StrSearch(0,sValue,".");
+			IF PosDecPoint > -1 THEN
+				sSecPortion = StrMid(sValue,0,PosDecPoint);
+				sMSPortion  = StrMid(sValue,PosDecPoint,4);
+				rPeriod = StrToPeriod(sSecPortion) + StrToReal(sMSPortion);
+				TrnSetPeriod(hTrendAN, rPeriod);
+			ELSE
+				TrnSetPeriod(hTrendAN, StrToPeriod(sValue));
+			END
+		END
+	END
+	TrendPenToolTip(hTrendAN,0,0,0,0,0,0,0,0,2);  //****New Code line
+	
+	return 0;
+END
+
+
+/*
+**	TrendSetEventbase
+**
+**	This function allows the operator to set the time
+**	interval between each sample.
+*/
+
+INT
+FUNCTION 
+TrendSetEventbase(INT hTrendAN, STRING sValue = "")
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		sValue = TimeToStr(TrnGetPeriod(hTrendAn), 5);
+		sValue = FormNumPad("@(New Resolution)", sValue, 0);
+	END
+	IF IsError() <> 299 THEN
+		IF sValue <> "" THEN
+			TrnSetPeriod(hTrendAN, StrToPeriod(sValue));
+		END
+	END
+	
+	return 0;
+END
+
+
+/*
+**	TrendSetTime
+**
+**	This function set the 0% time of the trend via a
+**	keypad form. This allows the user to view trend
+**	information up to the time entered.
+*/
+
+INT
+FUNCTION 
+TrendSetTime(INT hTrendAN, STRING sValue = "")
+	INT	iCurrent;
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		iCurrent = TrnGetTime(hTrendAn, 0, 0);
+		sValue = TimeToStr(iCurrent, 1);
+		sValue = FormNumPad("@(New End Time)", sValue, (32+64+128));
+	END
+	IF IsError <> 299 THEN
+		_TrendSetTime(hTrendAN, sValue);
+	END
+	
+	return 0;
+END
+
+/*
+**	TrendSetEvent
+**
+**	This function set the 0% event of the trend via a
+**	keypad form. This allows the user to view trend
+**	information up to the event entered.
+*/
+
+INT
+FUNCTION 
+TrendSetEvent(INT hTrendAN, STRING sValue = "")
+	INT	iCurrent;
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		sValue = TrnGetEvent(hTrendAn, 0, 0);
+		sValue = FormNumPad("@(New End Event)", sValue, 0);
+	END
+	IF IsError() <> 299 THEN
+		TrnSetEvent(hTrendAN, 0, sValue);
+	END
+	
+	return 0;
+END
+
+/*
+**	TrendSetDate
+**
+**	This function set the 0% date of the trend. This allows the user
+**	to view trend information up to the date entered.
+*/
+
+INT
+FUNCTION 
+TrendSetDate(INT hTrendAN, STRING sValue = "")
+	INT	iCurrent;
+
+	sValue = StrTrim( sValue );
+	IF sValue = "" THEN
+		iCurrent = TrnGetTime(hTrendAn, 0, 0);	
+		sValue = TimeToStr(iCurrent, 2);
+		sValue = FormNumPad("@(New End Date)", sValue, (8));
+	END
+	IF IsError <> 299 THEN
+		_TrendSetDate(hTrendAN, sValue);
+	END
+	
+	return 0;
+END
+
+/*
+**	TrendSetNow
+**
+**	This function sets the trend to Realtime.
+**
+*/
+
+INT
+FUNCTION 
+TrendSetNow(INT hTrendAN)
+	IF (TrnSetTime(hTrendAn, -1, 0) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+
+	return 0;
+END
+
+/*
+**	TrendSetSpan
+**
+**	This function sets the total amount of time
+**	of the trend graph in history or realtime mode fonts.
+*/
+
+INT
+FUNCTION 
+TrendSetSpan(INT hTrendAN, STRING sSpan = "")
+	STRING	sNewValue;
+	INT	iStartTime;
+	INT	iEndTime;
+	INT	iSpan;
+
+	sSpan = StrTrim(sSpan);
+	IF sSpan = "" THEN
+		iSpan = TrnGetSpan(hTrendAN);
+		IF iSpan = 0 THEN
+			iStartTime = TrnGetTime(hTrendAN, 0, 0);
+			iEndTime = TrnGetTime(hTrendAN, 0, 100);
+			IF iStartTime = 0 OR iEndTime = 0 THEN
+				sSpan = "N/A"
+			ELSE
+				sSpan = TimeToStr((iStartTime-iEndTime), 5);
+				sSpan = FormNumPad("@(New Span Time)", sSpan, (32+512));
+			END
+		ELSE
+			sSpan = TimeToStr(iSpan, 5);
+			sSpan = FormNumPad("@(New Span Time)", sSpan, (32+512));
+		END
+	END
+	IF IsError() <> 299 THEN
+		IF sSpan <> "" THEN
+			TrnSetSpan(hTrendAN, StrToPeriod(sSpan));
+		END
+	END
+
+	TrendPenToolTip(hTrendAN,0,0,0,0,0,0,0,0,2);  //****New Code line
+	
+	return 0;
+END
+
+/*
+**	TrendDspCursorTag
+**
+**	This function displays the tagname of the currently selected pen
+**	in the colour of the pen.
+**
+*/
+
+INT
+FUNCTION 
+TrendDspCursorTag(INT hTrendAN, INT mode = 0)
+	_TrendDspPenStr(hTrendAN, TrnGetPen(hTrendAN, 0, mode));
+
+	return 0;
+END
+
+/*
+**	TrendDspCursorValue
+**
+**	This function displays the cursor value of the currently 
+**	selected pen in the colour of the pen.
+**
+**  Exponential format is handled automatically when necessary.
+**
+*/
+
+INT
+FUNCTION 
+TrendDspCursorValue(INT hTrendAN)
+
+	RETURN _TrendDspExponentialValue(hTrendAN, TrnGetCursorValueStr(hTrendAN, 0, 0));
+
+END
+
+/*
+**	_TrendDspExponentialValue
+**
+**	This function displays a number at a specified
+**  AN using exponential formatting when necessary.  
+**
+**  In order to display numbers in exponential format
+**  (e.g. 2.4e+35) we make use of Cicode's built-in function
+**  overloading (through type conversion).  When an argument
+**  of type REAL is passed to a function that accepts a string,
+**  it will be converted to exponential format automatically
+**  when necessary.  
+**
+*/
+
+INT
+FUNCTION 
+_TrendDspExponentialValue(INT hTrendAN, STRING valueStr)
+
+	// Check that the value is actually a number before we attempt
+	// to convert it (i.e. not <na> or <gated>).  
+
+	IF (StrLeft(valueStr, 1) = "<") THEN
+		_TrendDspPenStr(hTrendAN, valueStr);			// Pass value as type STRING.
+	ELSE
+		_TrendDspPenStr(hTrendAN, StrToReal(valueStr));	// Pass value as type REAL.
+	END
+
+	RETURN 0;
+END
+
+INT
+FUNCTION 
+TrendDspCursorTime(INT hTrendAN,INT iFormat=1)
+	INT	msTime;
+
+	IF TrnGetPeriod(hTrendAN) < 1.0 OR iFormat=6 THEN
+		msTime = TrnGetBufMSTime(hTrendAN, 0, TrnGetCursorPos(hTrendAN));
+		_TrendDspPenStr(hTrendAN, TimeTostr(msTime, 6));			// change to mode 7 for ncr 11522
+	ELSE
+		_TrendDspPenStr(hTrendAN, TimeToStr(TrnGetCursorTime(hTrendAN, 0), iFormat));
+	END
+
+	return 0;
+END
+
+INT
+FUNCTION 
+TrendDspCursorEvent(INT hTrendAN)
+	INT	nEvent;
+	STRING	sEvent;
+
+	nEvent = TrnGetCursorEvent(hTrendAN, 0);
+	IF (nEvent <= 0) THEN
+		sEvent = "<na>";
+	ELSE
+		sEvent = IntToStr(nEvent);
+	END
+	_TrendDspPenStr(hTrendAN, sEvent);
+
+	return 0;
+END
+
+/*
+**	TrendDspCursorScale
+**
+**	This function displays the four scale values for the currently 
+**	selected pen on the right-hand side of the trend graph.
+**
+**  Exponential format is handled automatically when necessary.
+**
+*/
+
+INT
+FUNCTION 
+TrendDspCursorScale(INT hTrendAN, INT iPercentage)
+
+	RETURN _TrendDspExponentialValue(hTrendAN, TrnGetScaleStr(hTrendAN, 0, iPercentage, 0));
+
+END
+
+/*
+**	TrendDspSpan
+**
+**	This function displays the total amount of time
+**	of the trend graph in history or realtime mode fonts.
+*/
+
+INT
+FUNCTION 
+TrendDspSpan(INT hTrendAN)
+	INT	iStartTime;
+	INT	iEndTime;
+	INT	iSpan;
+	STRING	sSpan;
+
+	iSpan = TrnGetSpan(hTrendAN);
+	IF iSpan = 0 THEN
+		iStartTime = TrnGetTime(hTrendAN, 0, 0);
+		iEndTime = TrnGetTime(hTrendAN, 0, 100);
+		IF iStartTime = 0 OR iEndTime = 0 THEN
+			sSpan = "N/A"
+		ELSE
+			sSpan = TimeToStr((iStartTime-iEndTime), 5);
+		END
+	ELSE
+		sSpan = TimeToStr(iSpan, 5);
+	END
+	_TrendDspModeStr(hTrendAN, sSpan);
+
+	return 0;
+END
+
+/*
+**	_EventCreateTrendMouseCursor
+**
+**	Determineif the mouse has been pressed in the region of a trend.
+**	If so it creates an event to call _TrendMouseCursor() when
+**	the mouse moves. Another event destroys the trend cursor when
+**	leaving the page.
+*/
+
+INT
+FUNCTION
+_EventCreateTrendMouseCursor()
+	INT	hTrendAn;
+	INT	x;
+	INT	y;
+
+	hTrendAn = TrendGetAn();
+	IF hTrendAn <> 0 THEN
+		_TrendCursorMode(hTrendAn);
+		IF nTrendCursorMode = 1 THEN
+			TrendStartRubber();
+		END
+		OnEvent(0, _TrendMouseCursor);
+		OnEvent(5, _EventKillTrendMouseCursor);
+		_TrendMouseCursor();
+		RETURN 0;
+	END
+	_EventKillTrendMouseCursor();
+	RETURN -1;
+END
+
+/*
+**	_TrendMouseCursor
+**
+**	This function moves the trend cursor to the position 
+**	of the mouse cursor.
+*/
+
+INT
+FUNCTION
+_TrendMouseCursor()
+	INT	x;
+	INT	y;
+	INT	xt, yt;
+	INT	offset;
+	INT	width;
+	INT	hTrend1An;
+	INT	hTrend2An;
+
+	hTrend1An = TrendGetAn();
+	IF hTrend1An <> 0 THEN
+		DspGetMouse(x, y);
+		IF nTrendCursorMode = 0 THEN
+			DspAnGetPos(hTrend1An, xt, yt);
+			width = DspTrendInfo(DspAnInfo(hTrend1An, 1), 3, hTrend1An);
+			offset = (xt - x + width / 2) / width;
+			
+			IF TrnPageTypeSPCGet() = TRUE THEN
+                		SPCTrnCursorSet(hTrend1An, x);
+			ELSE
+				TrnSetCursorPos(hTrend1An, offset);
+				IF TrnPageTypeGet() = TRN_PAGE_COMPARE THEN
+					IF DspAnInfo((hTrend1An + 1), 0) = "6" THEN
+						hTrend2An = hTrend1An + 1;
+					ELSE
+						hTrend2An = hTrend1An - 1;
+					END
+
+					IF _TrendPenNameGet(hTrend2An, 0) <> "" THEN
+						TrnSetCursorPos(hTrend2An, offset);
+					END
+				END
+			END
+		ELSE
+			DspRubMove(x, y);
+		END
+	END
+	
+	RETURN 0;
+END
+
+/*
+**	_EventKillTrendMouseCursor
+**
+**	Disable the mouse cursor event and the page close event.
+**	If using ruber band box then end rubber banding.
+*/
+
+INT
+FUNCTION
+_EventKillTrendMouseCursor()
+	OnEvent(0, 0);
+	OnEvent(5, 0);
+	IF nTrendCursorMode = 1 THEN
+		nTrendCursorMode = 0;
+		TrendEndRubber();
+	END
+	RETURN 0;
+END
+
+/*
+**	_TrendCursorMode
+**
+**	Set the mode of the cursor:
+**	No trend cursor or mouse near trend cursor => trend cursor mode
+**	otherwise use a rubber band box.
+**	
+*/
+
+FUNCTION
+_TrendCursorMode(INT hTrendAn)
+	INT	xmouse;
+	INT	ymouse;
+	INT	xtrend;
+	INT	ytrend;
+	INT	xcursor;
+	INT	widthtrend;
+	INT	offset;
+
+	offset = TrnGetCursorPos(hTrendAn);
+	IF offset = -1 THEN
+		nTrendCursorMode = 0;
+	ELSE
+		DspGetMouse(xmouse, ymouse);
+		DspAnGetPos(hTrendAn, xtrend, ytrend);
+	
+		widthtrend = DspTrendInfo(DspAnInfo(hTrendAn, 1), 3, hTrendAn);
+		xcursor = xtrend + widthtrend / 2 - offset * widthtrend;
+	
+		IF xcursor - 20 > xmouse OR xcursor + 20 < xmouse THEN
+			nTrendCursorMode = 1;
+		ELSE
+			nTrendCursorMode = 0;
+		END
+	END
+END	
+
+/*
+**	_TrendDspPenStr
+**
+** 	Display a string with current trend font
+*/
+
+FUNCTION 
+_TrendDspPenStr(INT hTrendAN, STRING sValue)
+	INT	iNameAN;
+	STRING	sFont;
+	
+	// Remove any trailing period from the value string.
+	// (This occurs when Cicode performs build-in conversion
+	//  from REAL/INT to STRING data types (i.e. if REAL/INT
+	//  argument is passed instead of a STRING to this function.)
+	
+	IF (StrRight(sValue, 1) = ".") THEN
+		sValue = StrLeft(sValue, StrLength(sValue) - 1);
+	END
+
+	iNameAN = DspGetANCur();
+	sFont = "TrendSFont";
+	DspStr(iNameAN, sFont, sValue);
+END
+
+/*
+**	_TrendDspPenStr
+**
+** 	Display a string with trend mode font
+*/
+
+FUNCTION 
+_TrendDspModeStr(INT hTrendAN, STRING sValue)
+	INT	iNameAN;
+	STRING	sFont;
+
+	iNameAN = DspGetANCur();
+	IF TrnGetMode(hTrendAN, 0) = 0 THEN
+		sFont = "TrendSFont";
+	ELSE
+		sFont = "TrendSHistFont";
+	END;
+	DspStr(iNameAN, sFont, sValue);
+END
+
+/*
+**	_TrendSetDate
+**
+**	Set trend data/time from data
+*/
+
+FUNCTION 
+_TrendSetDate(INT hTrendAN, STRING sValue)
+	INT	iCurrent;
+	STRING	sTime;
+	STRING	sDate;
+	INT	iNew;
+
+	iCurrent = TrnGetTime(hTrendAn, 0, 0);	
+	sTime = TimeToStr(iCurrent, 1);
+	sDate = sValue;
+	iNew = StrToDate(sDate) + StrToTime(sTime);
+
+	IF (TrnSetTime(hTrendAn, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+
+END
+
+/*
+**	_TrendSetTime
+**
+**	Set trend data/time from time
+*/
+
+FUNCTION 
+_TrendSetTime(INT hTrendAN, STRING sValue)
+	INT	iCurrent;
+	STRING	sTime;
+	STRING	sDate;
+	INT	iNew;
+	
+	iCurrent = TrnGetTime(hTrendAn, 0, 0);
+	sTime = sValue;
+	sDate = TimeToStr(iCurrent, 2);
+	iNew = StrToDate(sDate) + StrToTime(sTime);	
+	
+	TrnSetTime(hTrendAN, -1, iNew);
+END
+
+STRING
+FUNCTION
+TrendGetPeriod(INT hAn)
+
+	REAL	period;
+	INT	PeriodMS;
+	INT	SecondPortion;
+	INT	MSPortion;
+	INT	Hr;
+	INT	Min;
+	INT	Sec;
+
+	period   = TrnGetPeriod(hAn);
+	PeriodMS = period * 1000;
+
+	SecondPortion 	= PeriodMS / 1000;
+	MSPortion	= PeriodMS - (SecondPortion * 1000);
+	
+	IF MSPortion = 0 THEN
+		RETURN TimeToStr(period,5);
+	ELSE
+		Hr = (PeriodMS - (PeriodMS / 86400000 * 86400000)) / 3600000;
+		IF Hr <> 0 THEN
+			RETURN TimeToStr(period,5);
+		ELSE
+			Min = PeriodMS / 60000;
+			IF Min <> 0 THEN
+				Sec = (PeriodMS - Min * 60000) / 1000;
+				RETURN (IntToStr(Min) + ":" + IntToStr(Sec) + "." + IntToStr(MSPortion)); 
+			ELSE
+				RETURN (RealToStr(period,7,3));
+			END 
+		END
+
+	END		 
+END
+
+/*
+**	TrendPenToolTip
+**
+**	This function displays the tagname and comment of the currently selected pen
+**	as a user tip on the trend selection buttons.
+**
+**	This function is called ONCE from an advanced Anim point on trend page/template
+**	when the page is opened.  (use PageInfo(7)="1" to detect page open)
+**
+**	VGA EXAMPLE: {IF PageInfo(7)="1" THEN TrendPenToolTip(30,26,36,40,41,42,43,44,45) END;}
+**	SVGA EXAMPLE: {IF PageInfo(7)="1" THEN TrendPenToolTip(30,52,53,54,55,56,69,70,71) END;}
+**	XGA EXAMPLE: {IF PageInfo(7)="1" THEN TrendPenToolTip(30,100,101,102,103,104,105,106,107) END;}
+**	NB: for double trend, simply use two advanced anim function calls as above
+**
+**	The function call hands over :
+**	1) the Trend anim point
+**	2) the anim point for each selection button (8 in total).
+**
+**	NOTE :	
+**	 Not all trend pages use the same animation points for trend select button !!  
+**	 It varies greatly between styles, even for page templates with the SAME name.
+**	 The mode argument defaults to one for normal operation as shown above. Mode = 2
+**	 may be used to refresh the tooltips provided the page has not changed. In this
+**	 mode, the 8 pen An numbers are ignored.
+**
+**	Rev 1.00	Date: 16/6/96		B.M. Innocent, W.A. Cromarty & Co. P/L
+**	Rev 1.01	Date: 25/7/96		(tracemsgs, etc. removed, rewrite help)
+**	Rev 1.02	Date: 3/4/97		MB. Support for 4 trends per page.
+*/
+
+
+
+/* Common Variables / Arrays */
+
+INT	MAX_TRENDS	= 4;
+INT	TREND_ARRAY_SIZE = 9;
+INT	TREND_OFFSET	= 63;
+
+STRING	giTrnPageName = "";
+
+INT
+FUNCTION 
+TrendPenToolTip(INT iTrendAn, INT iAn1, INT iAn2, INT iAn3, INT iAn4, 
+					INT iAn5, INT iAn6, INT iAn7, INT iAn8, INT Mode = 1)
+
+	INT iElement;
+	INT iPen;
+	INT iAnim;
+	INT iArrayStart;
+	INT iArrayEnd;
+	INT iTrend_No;
+	STRING sTrnTag;
+	STRING sTrnComment;
+
+	SELECT CASE Mode
+	CASE 1
+		giTrnPageName = PageInfo(0);
+
+		iTrend_No = 1;
+		iArrayStart = TREND_OFFSET;
+		WHILE (iTrend_No <= MAX_TRENDS AND PageGetInt(iArrayStart) <> 0) DO
+			iArrayStart = iArrayStart + TREND_ARRAY_SIZE;
+			iTrend_No = iTrend_No + 1;
+		END
+		IF (iTrend_No > MAX_TRENDS) THEN
+			RETURN 0;
+		END
+		
+		PageSetInt(iArrayStart, iTrendAn);
+	 	PageSetInt(iArrayStart+1,iAn1); 
+		PageSetInt(iArrayStart+2,iAn2); 
+ 		PageSetInt(iArrayStart+3,iAn3); 
+ 		PageSetInt(iArrayStart+4,iAn4); 
+		PageSetInt(iArrayStart+5,iAn5); 
+		PageSetInt(iArrayStart+6,iAn6); 
+		PageSetInt(iArrayStart+7,iAn7); 
+		PageSetInt(iArrayStart+8,iAn8);
+			
+	CASE 2
+		IF NOT (PageInfo(0) = giTrnPageName) THEN
+			RETURN 0;
+		END
+	CASE ELSE 
+		RETURN 0;
+	END SELECT
+
+	iTrend_No = 1;
+	iArrayStart = TREND_OFFSET;
+	WHILE (iTrend_No <= MAX_TRENDS AND PageGetInt(iArrayStart) <> iTrendAn) DO
+		iArrayStart = iArrayStart + TREND_ARRAY_SIZE;
+		iTrend_No = iTrend_No + 1;
+	END
+	IF (iTrend_No > MAX_TRENDS) THEN
+		RETURN 0;
+	END
+	iArrayStart = iArrayStart + 1;
+	iArrayEnd = iArrayStart + TREND_ARRAY_SIZE - 2;
+	iPen = 0;
+   	FOR iElement = iArrayStart TO iArrayEnd DO			
+		iAnim	= PageGetInt(iElement);
+		IF iAnim <> -1 THEN
+     		iPen	= iPen + 1;
+ 			sTrnTag = TrnGetPen(iTrendAn, iPen);
+			IF sTrnTag = "" THEN 
+				sTrnTag		= "@(Unassigned)"; 
+				sTrnComment	= ""; 
+			ELSE
+				sTrnComment = TrnGetPenComment(iTrendAn, iPen);
+			END
+			DspSetTip(iAnim, ("@(Pen)" + " " + IntToStr(iPen) + "^n" + sTrnTag + "^n" + sTrnComment));     		
+		END
+   	END
+	RETURN 0;
+END
+
+
+/*******************************************************************************
+**      FILE:   Trend.ci
+**
+**      AUTHOR: Jacky Lang
+**
+**      DATE:   March 2001
+**
+**      REVISION:1.00
+**
+**      FUNCTION:
+**              Trend display mode / methods
+**
+**      ARGUMENTS:
+**		AN occupied by the trend object, default An is 30
+*********************************************************************************/
+
+STRING msPenSelected;
+STRING msCondenseOpt1;
+STRING msCondenseOpt2;
+STRING msCondenseOpt3;
+STRING msStretchOpt1;
+STRING msStretchOpt2;
+STRING msStretchOpt3;
+INT miTrendAN =30;
+INT mhForm;
+
+FUNCTION
+_UpdateOptionsForSelected(INT iTrendAN)
+
+    INT iCurCondenseOpt;
+    INT iCurStretchOpt;
+    INT iDisplayMode;
+
+	INT iPen = 0;
+	
+	IF StrLeft(msPenSelected, 3) = "Pen" THEN
+		iPen = StrToInt(StrRight(msPenSelected, 1));
+	END
+
+    ErrSet(1);
+    iDisplayMode = TrnGetDisplayMode(iTrendAN, iPen);
+    iCurCondenseOpt = iDisplayMode BITAND 0x0000007C;
+    ErrSet(0);
+    SELECT CASE iCurCondenseOpt
+	CASE 0
+		msCondenseOpt1 = 1;
+		msCondenseOpt2 = 0;
+    		msCondenseOpt3 = 0;
+	CASE 4
+    		msCondenseOpt1 = 0;
+		msCondenseOpt2 = 1;
+    		msCondenseOpt3 = 0;
+	CASE 8
+    		msCondenseOpt1 = 0;
+    		msCondenseOpt2 = 0;
+		msCondenseOpt3 = 1;
+    END SELECT
+    
+    iCurStretchOpt = iDisplayMode BITAND 0x00000F80
+    SELECT CASE iCurStretchOpt 
+	CASE 0
+		msStretchOpt1= 1;
+    		msStretchOpt2= 0;
+    		msStretchOpt3= 0;
+	CASE 128
+    		msStretchOpt1= 0;
+		msStretchOpt2= 1;
+    		msStretchOpt3= 0;
+	CASE 256
+    		msStretchOpt1= 0;
+    		msStretchOpt2= 0;
+		msStretchOpt3= 1;
+    END SELECT
+END
+
+FUNCTION
+TrendDisplayForm(INT iTrendAN = 30)
+
+	STRING sPrevPen;
+    INT errRead;
+
+	IF msPenSelected = "" THEN
+		msPenSelected = "Current"
+	END
+	
+	sPrevPen = msPenSelected;
+	msPenSelected = "";
+	
+    mhForm = FormNew("@(Trend Interpolator)", 52, 7, 25);
+    FormPrompt(12, 0, "@(Pen):");
+    FormComboBox(20, 0, 16, 5, msPenSelected, 1);
+    FormAddList("Current");
+    FormAddList("All");
+    FormAddList("Pen 1");
+    FormAddList("Pen 2");
+    FormAddList("Pen 3");
+    FormAddList("Pen 4");
+    FormAddList("Pen 5");
+    FormAddList("Pen 6");
+    FormAddList("Pen 7");
+    FormAddList("Pen 8");
+
+	msPenSelected = sPrevPen;
+	
+    FormGroupBox(0, 1, 24, 6, "@(Condense Options)");
+    FormRadioButton(2, 2, "@(Average/Default)", msCondenseOpt1);
+    FormRadioButton(2, 3, "@(Minimum)", msCondenseOpt2);
+    FormRadioButton(2, 4, "@(Maximum)", msCondenseOpt3);
+
+    FormGroupBox(25, 1, 26, 6, "@(Stretch Options)");
+    FormRadioButton(27, 2, "@(Step/Default)", msStretchOpt1);
+    FormRadioButton(27, 3, "@(Ratio)", msStretchOpt2);
+    //FormRadioButton(2, 9, "@(Raw Data)", msStretchOpt3);
+ 	
+    _UpdateOptionsForSelected(iTrendAN);
+    
+//    FormButton(0, 10, " @(Help) ", 0, 0);
+    FormButton(11, 6, "  @(Apply)  ", _ApplyDisplayMode, 0);
+    FormButton(28, 6, "  @(Close)  ", 0, 2);
+
+    miTrendAN = iTrendAN;
+    errRead = FormRead(1);
+    IF errRead = 0 THEN
+		WHILE FormActive(mhForm) DO
+			FormGetData(mhForm);
+			IF msPenSelected <> sPrevPen THEN
+				sPrevPen = msPenSelected;
+			    _UpdateOptionsForSelected(iTrendAN);
+			    FormSetData(mhForm);
+			END
+			Sleep(1);
+		END    
+	END
+END
+
+
+
+INT
+FUNCTION _ApplyDisplayMode()
+INT iPenSelected;
+INT iAppCondenseOpt;
+INT iAppStretchOpt;
+INT iDisplayMode;
+STRING sCondenseOpt;
+STRING sStretchOpt;
+
+    ErrSet(1);
+    iDisplayMode = TrnGetDisplayMode(miTrendAN,0);
+    ErrSet(0);
+    
+    iDisplayMode = iDisplayMode BITAND 0xFFDFF003;
+
+	FormGetData(mhForm);
+	SELECT CASE msPenSelected
+    	CASE "All"
+		iPenSelected = -1;
+    	CASE "Current"
+		iPenSelected = 0;
+    	CASE ELSE
+		iPenSelected = StrToInt(StrRight(msPenSelected, 1));
+	END SELECT
+
+	sCondenseOpt = msCondenseOpt3 + msCondenseOpt2 + msCondenseOpt1;
+    sStretchOpt =  msStretchOpt3 + msStretchOpt2 + msStretchOpt1;
+
+	SELECT CASE sCondenseOpt
+    	CASE "001"
+		iAppCondenseOpt = 0
+    	CASE "010"
+		iAppCondenseOpt = 4
+    	CASE "100"
+		iAppCondenseOpt = 8
+	END SELECT
+
+	SELECT CASE sStretchOpt
+    	CASE "001"
+		iAppStretchOpt = 0;
+    	CASE "010"
+		iAppStretchOpt = 128;
+    	CASE "100"
+		iAppStretchOpt = 256;
+	END SELECT
+	
+	iDisplayMode = iDisplayMode + iAppCondenseOpt + iAppStretchOpt;
+	ErrSet(1);
+	TrnSetDisplayMode(miTrendAN,iPenSelected,iDisplayMode);
+	//PROMPT("Pen:" + IntToStr(iPenSelected)+ "/Mode:" + IntToStr(iDisplayMode));
+	ErrSet(0);
+	RETURN 0
+END
+
+//This function added to V5.40 by JL 08/Jun/2001
+Int
+Function
+TrendDspCursorComment(INT hTrendAN)
+String sComment;
+	
+	sComment = TrnGetPenComment(hTrendAN,0);
+
+	_TrendDspPenStr(hTrendAN, sComment);
+	
+	Return 0;
+End
+

@@ -1,0 +1,221 @@
+!______________________________________________________________________________________________
+!
+!			Citect Utilities DLL Interface Functions
+!______________________________________________________________________________________________
+
+
+! CONTENTS :	1. POPUP MENUS
+
+
+!______________________________________________________________________________________________
+
+! 1. POPUP MENUS
+
+! USAGE :	DspPopupMenu( MenuNumber, sMenuItems, XPos, YPos, ScaleX, ScaleY );
+
+!		The menus are built by specifying the menu items in a CSV string and calling
+!		DspPopupMenu CiCode function below. Menu number zero is the menu that is first
+!		displayed and other menus can be linked to form sub-menus. The function is
+!		called with menu number set to -1 to display the menu on the screen. The menu
+!		will appear where the cursor is displayed or the co-ordinates can be specified.
+!		The function will return the selection as a number that refers to the item
+!		position in the menu plus the menu number times 100. ie. 1 for the fist entry
+!		in menu zero and 101 for the first entry in menu one. If no selection is made,
+!		zero is returned.
+!		If calls are made with the same menu number, they will be added together to
+!		allow creating on a longer menu structure.
+
+!		If a '!' is placed at the front of the menu item, it will be shown as disabled.
+!		If a '~' is placed at the front of the menu item, it will be shown as checked.
+
+!		If a '>#' is placed at the end of the menu item, it will be a link to another
+!		menu where # is the linked menu number. (A linked entry will not count as a
+!		menu entry in regards to the returned selection number from the function as
+!		described above).
+
+!		If a bitmap is to be shown on the left of the menu entry, place '[%%%%%%%]' at
+!		the front of the menu item (before the text, but after a disable or check char)
+!		where %%%%%%% is the bitmap name (without the .bmp extension). The bitmap file
+!		should be placed in the same directory as the DLL file. The bitmaps can any
+!		reasonable size and the colour RGB(255,0,255) - which is LIGHT_MAGENTA, will be
+!		shown as transparent when displayed on the menu.
+
+!		If bScaleX is TRUE and [Page]DynamicSizing = 1 and XPos is not equal to -1 
+!		XPos will be scaled.
+!		If bScaleY is TRUE and [Page]DynamicSizing = 1 and YPos is not equal to -1 
+!		YPos will be scaled.
+!		bScaleX is TRUE by default.
+!		bScaleY is TRUE by default.
+!		Most menu coordinates would usually be scaled.  
+!		The menubar menu XPos coordinate would usually not be scaled.
+
+!		_______________________________________________________________________________
+
+!		EG 1:	DspPopupMenu( 0, "Item 1,Item 2,,Item 3" );
+!			iSelection = DspPopupMenu();
+
+!			This will display a menu with 3 entries and a separator between 2 & 3.
+!			If no selection is made, iSelection will be equal to 0;
+!			If 'Item 1' is selected, iSelection will be equal to 1;
+!			If 'Item 2' is selected, iSelection will be equal to 2;
+!			If 'Item 3' is selected, iSelection will be equal to 3;
+
+!		_______________________________________________________________________________
+
+!		EG 2:	DspPopupMenu( 0, "Item 4,!Item 5,~Item 6" );
+!			iSelection = DspPopupMenu(-1, "", 150, 300);
+
+!			This will display a menu with 3 entries at position 150, 300.
+!			'Item 4' will be shown as normal, 'Item 5' will be shown as disabled
+!			and 'Item 6' will be shown as checked.
+
+!		_______________________________________________________________________________
+
+!		EG 3:	DspPopupMenu( 0, "Item A,Item B>1,Item C" );
+!			DspPopupMenu( 1, "Item B-1,,[Trend]Item B-2,,Item B-3" );
+!			iSelection = DspPopupMenu();
+
+!			This will display a menu with 3 entries at position 150, 300.
+!			'Item B-2' will be shown with Trend.BMP on the left side.
+!			If 'Item A' is selected, iSelection will be equal to 1;
+!			If 'Item C' is selected, iSelection will be equal to 2;
+!			If 'Item B-1' is selected, iSelection will be equal to 101;
+!			If 'Item B-2' is selected, iSelection will be equal to 102;
+!			If 'Item B-3' is selected, iSelection will be equal to 103;
+
+!		_______________________________________________________________________________
+
+!		EG 4:	DspPopupMenu( 0, "Selection A^nSystem Display>1,[Icon1]Selection B>2,,!~[Icon2]Selection C>3,[Icon3]Item 1" );
+!			DspPopupMenu( 1, "[]Selection D>4,Selection E>5" );
+!			DspPopupMenu( 1, "Selection F>6,,~Item 1A" );
+!			DspPopupMenu( 2, "~[Icon3]Item 1B - This is a loooong^nand high^npiece^nof text" );
+!			DspPopupMenu( 3, "Item 1C,Item 2C" );
+!			DspPopupMenu( 4, "Item [1D],Item 2D,~Item 3D" );
+!			DspPopupMenu( 5, "~Item 1E" );
+!			DspPopupMenu( 6, "Item 1F,Item 2F" );
+!			iSelection = DspPopupMenu();
+
+!			This will display a menu with sub menus. Some entries have multiple
+!			lines of text by using a line feed '^n' in the text.
+!			Menu 3 will be shown as a standard windows menu with the check shown as
+!			a tick symbol. Menu 1 items will be shown using the check as per the
+!			display with bitmaps which is a lowered box beside the text. The '[]'
+!			at the start of each menu string can be used if the menu is to use some
+!			bitmaps and you want the same look over all the menu.
+
+!______________________________________________________________________________________________
+
+
+
+INT hDspPopupMenu	= -1;
+INT hSem		    = -1;
+	
+INT FUNCTION DspPopupMenu( INT iMenu = -1, STRING sData = "", INT iXPos = -1, INT iYPos = -1, INT bScaleX = TRUE, INT bScaleY = TRUE )
+
+	INT		iIndex	= -1;
+	INT		iLength;
+	STRING  sArgs 	= "";
+	STRING  sPath 	= GetCtUtilPath ();
+	INT		iError;
+	INT iNewXPos = iXPos;
+	INT iNewYPos = iYPos;
+
+	IF (hSem = -1) THEN
+		hSem = SemOpen ("DspPopup", 2);
+		IF (hSem = -1) THEN
+			DebugMsg("DspPopupMenu: Semaphore could not be created. iMenu=" + IntToStr(iMenu));
+			RETURN (-1);
+		END
+	END
+
+	iError = SemWait(hSem, 0);
+	IF iError <> 0 THEN
+		DebugMsg("DspPopupMenu: Semaphore in use. Not allowed to reenter. iMenu=" + IntToStr(iMenu));
+		RETURN (-1);
+	END
+
+	IF (hDspPopupMenu = -1) THEN
+		FileCopy(PathToStr("[BIN]:CTUTIL.DLL"), sPath+"\CTUTIL.DLL", 1);
+		hDspPopupMenu = DLLOpen(sPath+"\CTUTIL.DLL", "DspPopupMenu", "IJCJJC");
+	END
+
+	// If the coordinates passed in are NOT -1, then we have been asked to
+	// display the popup menu at some hard-coded location.
+	// Coordinates passed-in are assumed to be returned from display functions
+	// such as DspGetMouse(), DspAnGetPos(), etc. The page coordinates are transformed
+	// to Canvas coordinates to compensate for dynamic sizing and scrollbar offsets.
+	
+	PageTransformCoords(WinNumber(), iNewXPos, iNewYPos, iNewXPos, iNewYPos, 2);
+	
+	IF (bScaleX) THEN
+		IF (iXPos <> -1) THEN
+			iXPos = iNewXPos;
+		END
+	END
+	
+	IF (bScaleY) THEN
+		IF (iYPos <> -1) THEN
+			iYPos = iNewYPos;
+		END
+	END	
+	
+	iLength = StrLength ( sData );
+	IF ( iLength > 240 ) THEN
+		sData = StrLeft ( sData, StrLength ( sData ) - 20 );
+		sData = sData + ",!Too Long by " + IntToStr ( iLength - 240 );
+	END
+	IF (hDspPopupMenu <> -1) THEN
+		iIndex = DLLCallEx(hDspPopupMenu, iMenu, sData, iXPos, iYPos, sPath);
+		IF (iIndex >= 0) THEN 
+			iIndex = StrToInt(_GetCtUtilData(iIndex));
+		ELSE
+			iIndex = -1;
+		END
+	END
+
+	SemClose (hSem);
+	hSem = -1;
+	RETURN (iIndex);
+END
+
+
+!______________________________________________________________________________________________
+
+STRING FUNCTION GetCtUtilPath()
+
+	STRING sPath = PathToStr("[Run]:");
+
+	IF (StrRight(sPath, 1) = "\") THEN sPath = StrLeft(sPath, StrLength(sPath)-1); END
+
+	RETURN (sPath);
+END
+
+
+!______________________________________________________________________________________________
+
+
+INT hCtUtilActive	= -1;
+INT hGetCtUtilData	= -1;
+
+STRING FUNCTION _GetCtUtilData(INT iIndex)
+
+	STRING	sData	= "";
+
+	IF (hCtUtilActive = -1) THEN
+		hCtUtilActive = DLLOpen(GetCtUtilPath()+"\CTUTIL.DLL", "IsActive", "II");
+	END
+	IF (hGetCtUtilData = -1) THEN
+		hGetCtUtilData = DLLOpen(GetCtUtilPath()+"\CTUTIL.DLL", "GetData", "CI");
+	END
+
+	IF (hCtUtilActive <> -1) AND (hGetCtUtilData <> -1) THEN
+
+		WHILE (DLLCall(hCtUtilActive, IntToStr(iIndex)) <> "0") DO
+			SleepMS(100);
+		END
+
+		sData = DLLCall(hGetCtUtilData, IntToStr(iIndex));
+	END
+
+	RETURN (sData);
+END

@@ -1,0 +1,417 @@
+//-----------------------------------------------------------------------------
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:		Display.ci
+//
+//	CREATED:	29/04/2009
+//
+//	AUTHOR:		Michael Yip
+//
+//	SUMMARY:
+//
+//		Contains related functions for displaying objects on built-in templates.
+//
+//	PUBLIC FUNCTIONS:
+//
+//		DspLogo
+//		DspPopupConfigMenu
+//				
+// 	REMARKS: 
+//
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+//	Constants
+//-----------------------------------------------------------------------------
+
+INT c_MENU_DEPTH_MAX = 10;					// maximum menu depth allowed
+
+
+//-----------------------------------------------------------------------------
+//	Module Variables
+//-----------------------------------------------------------------------------
+
+INT m_DspPopupConfigMenu_InUse = 0;			// whether DspPopupConfigMenu() is in use
+INT m_DspPopupConfigMenu_ItemsCreated = 0;	// the menu items created by last _DspPopupConfigMenu_Create()
+INT m_DspPopupConfigMenu_Result = 0;		// the last result of _DspPopupConfigMenu_Execute()
+INT m_DspPopupConfigMenu_MenuDepth = 0;		// the item number selected made by current DspPopupConfigMenu()
+
+
+//-----------------------------------------------------------------------------
+//	Public Functions
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		DspLogo
+//
+//	SUMMARY:
+//		Display company logo at specified x and y coordinates.  The logo must be defined as
+//		a symbol in one of the Citect library.
+//			
+//	PARAMS:
+//		AN			-	Optional, the animation number to display the logo, if not specified, use current AN
+//		logo		-	Optional, symbol to be displayed as a logo, if not specified, default to
+//						value specified in parameter [Page]Logo
+//		logoDefault	-	Optional, default symbol to be displayed as a logo
+//			
+//	RETURNS: 
+//		0 if run successfully or -1 if failed
+//
+//	REMARKS:
+//		1. The logo will only be displayed on the first scan/update of the page.
+//		2. A task is required because this function is typically called in foreground cicode and the [RUN]
+//		   folder maybe located on a network drive which could block the kernel.
+//
+//-----------------------------------------------------------------------------
+	
+INT FUNCTION DspLogo(INT AN, STRING logo = "", STRING logoDefault = "")
+    STRING args;
+
+	IF (PageInfo(7) = "0") THEN
+		// get coordinates from the calling AN if position is not specified
+		IF (AN <= 0) THEN
+			AN = DspGetAnCur();
+		END
+		IF (AN <= 0) THEN
+			RETURN -1;
+		END
+
+		IF ("" = logo) THEN
+			logo = ParameterGet("Page", "Logo", "");
+		END
+
+		args = IntToStr(AN) + ",^"" + logo + "^",^"" + logoDefault + "^"";
+		TaskNew("_DspLogo_LoadSymbol", args, 2);
+	END
+	RETURN 0;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_DspLogo_LoadSymbol
+//
+//	SUMMARY:
+//		Worker function for DspLogo(). This function loads a symbol in a new AN
+//		at the specified page coordinates.
+//			
+//	PARAMS:
+//		AN			-	The animation number to display the logo
+//		logo		-	symbol to be displayed as a logo
+//			
+//	RETURNS: 
+//		0 if run successfully or error code if failed
+//
+//	REMARKS:
+//		1. The logo will only be displayed on the first scan/update of the page.
+//		2. A task is required because this function is typically called in foreground cicode and the [RUN]
+//		   folder maybe located on a network drive which could block the kernel.
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION _DspLogo_LoadSymbol(INT AN, STRING logo, STRING logoDefault)
+	INT ret = -1;
+	
+	IF (AN <= 0) THEN
+		RETURN -1;
+	END
+
+	ErrSet(1);
+	IF ("" <> logo) THEN
+		ret = DspSym(AN, logo, 1);
+	END
+	IF ((0 <> ret) AND ("" <> logoDefault)) THEN
+		ret = DspSym(AN, logoDefault, 1);
+	END
+	ErrSet(0);
+	RETURN ret;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		DspPopupConfigMenu
+//
+//	SUMMARY:
+//		Displays the contents of a menu node as a pop-up (context) menu, and
+//		run the command configured for the selected menu item.
+//		You can specify the contents of a menu using the menu configuration dialog
+//		at design time, or creating them using the Menu family of Cicode
+//		functions at runtime.
+//			
+//	PARAMS:
+//		hParent			- The parent node of the menu tree
+//		bNonRecursive	- Whether not to recursively transverse child trees and listed them as sub-menus
+//							0 - recursively list child tree nodes via sub-menus (default)
+//							1 - list immediate child nodes only, and list tree nodes as normal menu items
+//		xPos			- The x-coordinate (relative to the page) at which the menu will be displayed.
+//							This parameter is optional. If it is left unspecified, the menu will display at the cursor's current position.
+//		yPos			- The y-coordinate (relative to the page) at which the menu will be displayed.
+//							This parameter is optional. If it is left unspecified, the menu will display at the cursor's current position.
+//			
+//	RETURNS: 
+//		0 if the selected meun command is run or error code if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION DspPopupConfigMenu(INT hParent, INT bNonRecursive = 0, INT xPos = -1, INT yPos = -1)
+	INT status = 0;
+	INT xPosCur;
+	INT yPosCur;
+	INT errLevelOld;
+
+	IF (m_DspPopupConfigMenu_InUse) OR (hParent < 0) THEN
+		RETURN 274;							// invalid argument
+	END
+	m_DspPopupConfigMenu_InUse = 1;
+
+	// get current mouse position BEFORE it may be moved again
+	DspGetMouse(xPosCur, yPosCur);
+	IF (xPos = -1) THEN
+		xPos = xPosCur;
+	END
+	IF (yPos = -1) THEN
+		yPos = yPosCur;
+	END
+
+	// set up internal error checking
+	errLevelOld = ErrSetLevel(1);
+	IsError();
+
+	m_DspPopupConfigMenu_ItemsCreated = 0;				// reset menu items created
+	m_DspPopupConfigMenu_MenuDepth = 0;					// reset menu depth count
+	_DspPopupConfigMenu_Create(hParent, bNonRecursive);
+	IF (m_DspPopupConfigMenu_ItemsCreated > 0) THEN
+		_DspPopupConfigMenu_Execute(hParent, bNonRecursive, DspPopupMenu(-1, "", xPos, yPos));
+	ELSE
+		m_DspPopupConfigMenu_Result = 274;	// invalid argument
+	END
+	
+	// check for other internal errors
+	status = IsError();
+	IF (0 = status) THEN
+		status = m_DspPopupConfigMenu_Result;
+	END
+	ErrSetLevel(errLevelOld);
+
+	m_DspPopupConfigMenu_InUse = 0;
+
+	RETURN status;
+END
+
+
+//-----------------------------------------------------------------------------
+//	Private Functions
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_DspPopupConfigMenu_Create
+//
+//	SUMMARY:
+//		Creates the items for the pop-up menu based on the contents of the child
+//		nodes of the specified parent menu node.
+//			
+//	PARAMS:
+//		hParent			- The parent node of the menu tree
+//		bNonRecursive	- Whether not to recurse child trees and listed them as sub-menus
+//		menuNumber		- The menu number for the pop-up menu items
+//			
+//	RETURNS: 
+//		The menu number of the last sub-menu added to the pop-up menu 
+//
+//	REMARKS:
+//		This fn returns the number of menu items created (for pop-up menu) via module variable
+//		m_DspPopupConfigMenu_ItemsCreated
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _DspPopupConfigMenu_Create(INT hParent, INT bNonRecursive, INT menuNumber = 0)
+	INT menuNumberLast = menuNumber;
+	INT hChild;
+	STRING sItem;
+
+	IF (hParent < 0) THEN
+		// terminate node, do nothing
+		RETURN menuNumberLast;
+	END
+
+	// increment menu depth on entering recursive call
+	m_DspPopupConfigMenu_MenuDepth = m_DspPopupConfigMenu_MenuDepth + 1;
+	// browse child nodes
+	hChild = MenuGetFirstChild(hParent);
+
+	WHILE (hChild > -1) DO
+		sItem = _DspPopupConfigMenu_GetProperty(hChild);
+		// check if child node is a tree
+		IF (bNonRecursive) OR (MenuGetFirstChild(hChild) < 0)
+			OR (m_DspPopupConfigMenu_MenuDepth >= c_MENU_DEPTH_MAX) THEN
+			// add node as menu item regardless when in non-recursive mode or reached max menu depth
+			DspPopupMenu(menuNumber, sItem);
+			m_DspPopupConfigMenu_ItemsCreated = m_DspPopupConfigMenu_ItemsCreated + 1;
+		ELSE
+			// tree node, add it as sub-menu
+			DspPopupMenu(menuNumber, sItem + ">" + IntToStr(menuNumberLast + 1));
+			m_DspPopupConfigMenu_ItemsCreated = m_DspPopupConfigMenu_ItemsCreated + 1;
+			menuNumberLast = _DspPopupConfigMenu_Create(hChild, bNonRecursive, menuNumberLast + 1);
+		END
+		hChild = MenuGetNextChild(hChild);
+	END
+
+	// decrement menu depth on exiting recursive call
+	m_DspPopupConfigMenu_MenuDepth = m_DspPopupConfigMenu_MenuDepth - 1;
+
+	RETURN menuNumberLast;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_DspPopupConfigMenu_Execute
+//
+//	SUMMARY:
+//		Executes the command of a menu node according to the selection made in
+//		the pop-up menu.
+//			
+//	PARAMS:
+//		hParent			- The parent node of the menu tree
+//		bNonRecursive	- Whether not to recurse child trees and listed them as sub-menus
+//		selection		- The selection number returned by DspPopupMenu()
+//							Please see function DspPopupMenu() for more details
+//		menuNumber		- The menu number the menu node specified by hParent represents
+//							in the context of the pop-up menu
+//			
+//	RETURNS:
+//		The menu number of the last sub-menu added to the pop-up menu
+//
+//	REMARKS:
+//		The error code of execution of this fn is returned via module variable
+//		m_DspPopupConfigMenu_Result
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+INT FUNCTION _DspPopupConfigMenu_Execute(INT hParent, INT bNonRecursive, INT selection, INT menuNumber = 0)
+	INT menuNumberSelected;
+	INT itemNumberSelected;
+	INT itemCount;
+	INT hChild;
+
+	// check arguments
+	IF (selection < 1) THEN
+		// no selection is made
+		m_DspPopupConfigMenu_Result = 299;		// cancelled
+		RETURN menuNumber;
+	END
+
+	IF (hParent < 0) THEN
+		// terminate node, invalid selection
+		m_DspPopupConfigMenu_Result = 256;		// general software error
+		RETURN menuNumber;
+	END
+
+	// increment menu depth on entering recursive call
+	m_DspPopupConfigMenu_MenuDepth = m_DspPopupConfigMenu_MenuDepth + 1;
+
+	hChild = MenuGetFirstChild(hParent);
+
+	menuNumberSelected = selection / 100;
+	IF (menuNumberSelected > menuNumber) THEN
+		IF (m_DspPopupConfigMenu_MenuDepth < c_MENU_DEPTH_MAX) THEN
+			// recurse the child nodes of this tree
+			WHILE (hChild > -1) AND (menuNumber < menuNumberSelected) DO
+				// only traverse tree nodes
+				IF (MenuGetFirstChild(hChild) > -1) THEN
+					menuNumber = _DspPopupConfigMenu_Execute(hChild, bNonRecursive, selection, menuNumber + 1);
+				END
+				hChild = MenuGetNextChild(hChild);
+			END
+		END
+	ELSE
+		// Run command of the selected node on this level
+		itemNumberSelected = selection MOD 100;
+		itemCount = 0;
+		WHILE (hChild > -1) AND (itemCount < itemNumberSelected) DO
+			// only count leave nodes when in recursive mode or reached max menu depth
+			// otherwise count all nodes
+			IF (bNonRecursive) OR (MenuGetFirstChild(hChild) < 0)
+				OR (m_DspPopupConfigMenu_MenuDepth >= c_MENU_DEPTH_MAX) THEN
+				itemCount = itemCount + 1;
+				IF (itemCount = itemNumberSelected) THEN
+					IF ("!" <> StrLeft(_DspPopupConfigMenu_GetProperty(hChild), 1)) THEN
+						m_DspPopupConfigMenu_Result = MenuNodeRunCommand(hChild);
+					END
+				END
+			END
+			hChild = MenuGetNextChild(hChild);
+		END
+	END
+
+	// decrement menu depth on exiting recursive call
+	m_DspPopupConfigMenu_MenuDepth = m_DspPopupConfigMenu_MenuDepth - 1;
+
+	RETURN menuNumber;
+END
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		_DspPopupConfigMenu_GetProperty
+//
+//	SUMMARY:
+//		Gets the property of the menu node and construct a string to represent
+//		the menu item that can be passed to Cicode function DspPopupMenu().
+//			
+//	PARAMS:
+//		hNode		- The menu node
+//			
+//	RETURNS:
+//		the string that represents the menu item
+//
+//-----------------------------------------------------------------------------
+
+PRIVATE
+STRING FUNCTION _DspPopupConfigMenu_GetProperty(INT hNode)
+	STRING retValue = "";
+	STRING itemName;
+	INT area, privilege;
+
+	IF (hNode < 0) THEN
+		RETURN retValue;
+	END
+
+	// get disabled flag
+	privilege = MenuNodeGetProperty(hNode, 2);
+	area = MenuNodeGetProperty(hNode, 3);
+	IF NOT GetPriv(privilege, area) THEN
+		retValue = "!";
+	ELSE IF MenuNodeIsDisabled(hNode) THEN
+		retValue = "!";
+	ELSE IF MenuNodeIsHidden(hNode) THEN
+		retValue = "!";
+	END END END
+
+	// get checked flag
+	IF StrToInt(MenuNodeGetProperty(hNode, 5)) THEN
+		retValue = retValue + "~";
+	END
+
+	// get full item name
+	itemName = MenuNodeGetProperty(hNode, 0);
+	IF ("" = itemName) THEN
+		itemName = " ";
+	ELSE
+		itemName = StrToLocalText(itemName);
+		// strip invalid characters
+		IF (StrRight(itemName, 1) = ">") THEN
+			itemName = StrLeft(itemName, StrLength(itemName) - 1);
+		END
+	END
+	RETURN retValue + itemName;
+END

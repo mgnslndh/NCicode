@@ -1,0 +1,861 @@
+/*
+**	FILE:	Spc.ci
+**
+**	AUTHOR:	Robert Sanders
+**		Erhan Izmir
+**		Jared Thompson
+**
+**	DATE:	October 1992
+**
+**	REVISION:
+**
+**	1.0	First revision for release 1.1.
+**	3.0	Functions added for v3.00. (November 1994)
+**
+**	NOTES:
+**
+**	This file contains the default Spc functions. These functions
+**	animate the Spc elements on the display and process the buttons
+**	and commands.
+**
+**	These functions all assume a fixed order for the animation numbers.
+**	The Spc starts at an 40, 80 and all the Spc elements are at the same 
+**	offset from the base. Eg the low scale is at an 41, 81. The following
+**	offsets are used.
+**
+**		0	The graphic Spc.
+**		1	lower control limit
+**		3	centre line
+**		5	upper control limit
+**		7	start date
+**		8	start time
+**		9	period
+**		10	end date
+**		11	end time
+**		12..15	Spc scroll buttons <<, <, >, >>
+**		16	'timebase' string
+**		18	The SPC base pen name
+**		19..23	Spc cursor buttons <<, <, >, >>, off
+**		24	'value' string
+**		25	The mean, range or standard dev pen cursor value
+**		26	'time' string
+**		27	The mean, range or standard dev pen cursor time
+**		29	Boundary of Spc region, used to position cursor.
+**
+**	Three types of Spcs are supported:
+**
+**	Mean and Range Spc
+**
+**	Mean and Standard Deviation Spc
+**
+**	Mean and Mean Spc
+**
+*/
+
+	INT	hButtonFont;		/* button font handle	*/
+	INT	hSpcFont;		/* Spc font handle	*/
+	INT	hSpcHistFont;		/* Spc historical font handle	*/
+        INT     hCLFont;		/* CL lines and values font	*/
+        INT     hCentreLineFont;        /* Centre line and value font   */
+        INT     SPCPageType;
+	INT	hPenArray[8];		/* trend pen fonts	*/
+
+/* Defines */
+
+	INT	SPC_DEFAULT_WIDTH	  = 9;
+
+	INT	SPC_MEAN_RANGE = 1;
+        INT     SPC_MEAN_SDEV  = 2;
+        INT     SPC_MEAN_MEAN  = 3;
+
+	INT	CICODE_SPC_XUCL	= 1;
+	INT	CICODE_SPC_XLCL	= 2;
+	INT	CICODE_SPC_RUCL	= 3;
+	INT	CICODE_SPC_RLCL	= 4;
+	INT	CICODE_SPC_SUCL	= 5;
+	INT	CICODE_SPC_SLCL	= 6;
+	INT	CICODE_SPC_XCL	= 7;
+	INT	CICODE_SPC_RCL	= 8;
+	INT	CICODE_SPC_SCL	= 9;
+	INT	CICODE_SPC_RANGE = 10;
+        INT     CICODE_SPC_SDEV  = 11;
+        INT     CICODE_SPC_MEAN  = 12;
+
+
+	INT	AUTOMATIC_SET   = 0;
+	INT	MANUAL_SET      = 1;
+
+/*
+**	FUNCTION NAME:	_SpcInit
+**
+**	This function is called at startup to initialize any variables
+**	used by default Spc functions. It gets font handles for all
+**	the fonts used by the Spc display functions.
+**
+*/
+
+FUNCTION
+_SpcInit()
+	INT	i;
+
+	FOR i = 0 TO 7 DO
+		hPenArray[i] = DspFontHnd("Pen" + (i + 1):# + "TrendFont");
+	END
+
+	hSpcFont = DspFontHnd("TrendFont");
+        hSpcHistFont = DspFontHnd("TrendHistFont");
+        hCLFont = DspFont("Courier", 10, LIGHT_RED, TRANSPARENT);
+        hCentreLineFont = DspFont("Courier", 10, YELLOW, TRANSPARENT);
+	hButtonFont = DspFontHnd("ButtonFont");
+END
+
+
+
+/*
+**	FUNCTION NAME:	_DefaultSpc
+**
+**	This is called if the Spc type field is left blank. This
+**	function will try to call the correct Spc function by using
+**	the name of the background file. Note the error checking is
+**	disabled to stop hardware errors being generated from invalid
+**	Spc data.
+*/
+
+FUNCTION
+DefaultSpc()
+	STRING	sName;
+
+	sName = PageInfo(3);
+	IF sName = "SPC2" THEN
+		DspSpc1();
+	ELSE IF sName = "SPC1" THEN
+		DspSpc2();
+	ELSE IF sName = "SPC3" THEN
+		DspSpc3();
+	
+	END END END 
+END
+
+
+/*
+**	FUNCTION NAME:	DspSpc1
+**
+*/
+
+FUNCTION
+DspSpc1()
+	_SpcInitUpdate();
+END
+
+
+/*
+**	FUNCTION NAME:	DspSpc2
+**
+*/
+
+FUNCTION
+DspSpc2()
+	_SpcInitUpdate();
+END
+
+
+/*
+**	FUNCTION NAME:	DspSpc3
+**
+*/
+
+FUNCTION
+DspSpc3()
+	_SpcInitUpdate();
+END
+
+/*
+**	FUNCTION NAME:	_DspSpcTitles
+**
+**	This function displays the titles of Spcs.
+*/
+
+FUNCTION
+_DspSpcTitles(INT hAn, INT hFont)
+
+        IF SPCPageType = SPC_MEAN_RANGE THEN
+		DspText(68, hSpcFont, "@(Mean Chart)");
+		DspText(108, hSpcFont, "@(Range Chart)");
+        ELSE IF SPCPageType = SPC_MEAN_SDEV THEN
+		DspText(68, hSpcFont, "@(Mean Chart)");
+		DspText(108, hSpcFont, "@(Standard Dev.)");
+        ELSE
+		DspText(68, hSpcFont, "@(Mean Chart)");
+		DspText(108, hSpcFont, "@(Mean Chart)");			
+	END END
+		
+END
+
+		
+/*
+**	FUNCTION NAME:	_DspSpcControlLimits
+**
+**	This function displays the Spc upper and lower control limits and
+**	the centre line. It uses the format of the base trend.
+*/
+
+FUNCTION
+_DspSpcControlLimits(INT hAn)
+
+	INT    UCLPenNo;
+	INT    LCLPenNo;
+	INT    CLPenNo;
+	STRING BasePen;
+	INT    width;
+        INT    dec;
+
+	BasePen = TrnGetPen(hAn, 0);
+
+	IF hAn = 40 THEN 
+		UCLPenNo = TrnGetPenNo(hAn, BasePen + ".XUCL");
+		LCLPenNo = TrnGetPenNo(hAn, BasePen + ".XLCL");
+		CLPenNo  = TrnGetPenNo(hAn, BasePen + ".XCL");
+	ELSE
+		IF SPCPageType = SPC_MEAN_RANGE THEN
+			UCLPenNo = TrnGetPenNo(hAn, BasePen + ".RUCL");
+			LCLPenNo = TrnGetPenNo(hAn, BasePen + ".RLCL");
+			CLPenNo  = TrnGetPenNo(hAn, BasePen + ".RCL");
+		ELSE IF SPCPageType = SPC_MEAN_SDEV THEN
+			UCLPenNo = TrnGetPenNo(hAn, BasePen + ".SUCL");
+			LCLPenNo = TrnGetPenNo(hAn, BasePen + ".SLCL");
+			CLPenNo  = TrnGetPenNo(hAn, BasePen + ".SCL");
+		ELSE
+			UCLPenNo = TrnGetPenNo(hAn, BasePen + ".XUCL");
+			LCLPenNo = TrnGetPenNo(hAn, BasePen + ".XLCL");
+			CLPenNo  = TrnGetPenNo(hAn, BasePen + ".XCL");
+                END END
+	END
+
+	TrnGetFormat(hAn, BasePen, width, dec);
+	DspText(hAn + 5, hCLFont, StrFormat(TrnGetBufValue(hAn, UCLPenNo, 0), width, dec, ""));
+	DspText(hAn + 3, hCentreLineFont, StrFormat(TrnGetBufValue(hAn, CLPenNo, 0), width, dec, ""));
+	DspText(hAn + 1, hCLFont, StrFormat(TrnGetBufValue(hAn, LCLPenNo, 0), width, dec, ""));
+		
+END
+
+/*
+**	FUNCTION NAME:	_DspSpcTimeAndName
+**
+**	This function displays the start and end time. If bShowDate
+**	is TRUE it will display the start and end date. It also displays the
+**	the pen name.
+*/
+
+FUNCTION
+_DspSpcTimeAndName(INT hAn, INT hFont, INT bShowDate)
+	INT	StartTime;
+	INT	EndTime;
+	INT	Period;
+	INT     hTrmFont;
+	STRING  PenName;
+
+	StartTime = TrnGetTime(hAn, 0, 0);
+	EndTime = TrnGetTime(hAn, 0, 100);
+	Period = TrnGetPeriod(hAn);
+
+	IF TrnGetMode(40, 0) = 0 THEN
+		hTrmFont = hSpcFont;
+	ELSE
+		hTrmFont = hSpcHistFont;
+        END
+	
+	DspText(hAn +  8, hTrmFont, TimeToStr(StartTime, 1));
+	DspText(hAn + 11, hTrmFont, TimeToStr(EndTime, 1));		
+	DspText(hAn +  9, hTrmFont, TimeToStr(Period, 5));
+	
+	IF bShowDate THEN
+		DspText(hAn +  7, hTrmFont, TimeToStr(StartTime, 2));
+		DspText(hAn + 10, hTrmFont, TimeToStr(EndTime, 2));
+	END
+	PenName = TrnGetPen(hAn, 0);
+	DspText(hAn + 18, hFont, PenName);
+END
+
+
+/*
+**	FUNCTION NAME:	_DspSpcCursor
+**
+**	This function displays the current value and time of the
+**	Mean, Range or Standard Deviation value where the Spc cursor
+**	is on.
+*/
+
+FUNCTION
+_DspSpcCursor(INT hSPCAn, INT SPCType)
+
+	INT    iPenNo;
+	STRING sBasePen;
+
+	sBasePen = TrnGetPen(hSPCAn, 0);
+
+        IF SPCType = CICODE_SPC_MEAN THEN
+        	iPenNo = TrnGetPenNo( hSPCAn, sBasePen + ".X" );
+        ELSE IF SPCType = CICODE_SPC_RANGE THEN
+                iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".R");
+        ELSE IF SPCType = CICODE_SPC_SDEV THEN
+                iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".S");
+	ELSE
+                iPenNo = -1;
+        END END END 
+
+	IF iPenNo <> -1 THEN
+		_TrendDspPenStr(hSPCAN, TrnGetCursorValueStr(hSPCAN, iPenNo, 0));
+	END
+END
+
+
+
+/*
+**	FUNCTION NAME:	_DspSpcButton
+**
+**	This function sets the buttons for controlling of the Spc.
+**	These buttons are scrolling and cursor movement buttons.
+**	It will display the buttons the first time it is called for
+**	the current page.
+**	It will also set key sequences to alter the control limit values,
+**	period and time.
+**
+*/
+
+FUNCTION
+_DspSpcButton(INT hAn, INT bDspCursor = FALSE)
+	INT	height;
+
+	IF StrToInt(PageInfo(7)) = 0 THEN
+		IF bDspCursor THEN
+			height = 30;
+		ELSE
+			height = 18;
+		END
+		DspButtonFn(hAn + 12, _SpcScroll, "<<", hButtonFont, 25, height);
+		DspButtonFn(hAn + 13, _SpcScroll, "<",  hButtonFont, 25, height);
+		DspButtonFn(hAn + 14, _SpcScroll, ">",  hButtonFont, 25, height);
+		DspButtonFn(hAn + 15, _SpcScroll, ">>", hButtonFont, 25, height);
+		DspText(hAn + 16, hButtonFont, "@(Timebase)");
+		
+		
+		KeySetSeq("[" + IntToStr(KEY_LBUTTON_DN) + "]", 0, _SpcMouseCursor);
+		KeySetSeq("######## ENTER", hAn + 1, _SpcControlLimit);
+		KeySetSeq("######## ENTER", hAn + 5, _SpcControlLimit);
+		KeySetSeq("######## ENTER", hAn + 3, _SpcControlLimit);
+		KeySetSeq("ENTER", hAn + 8, _SpcTime);
+		KeySetSeq("######## ENTER", hAn + 9, _SpcPeriod);
+		KeySetSeq("############### ENTER", hAn + 18, _SpcTag);
+
+		IF bDspCursor = TRUE THEN
+			DspButtonFn(hAn + 19, _SpcCursor, "<<",  hButtonFont, 20, 20);
+			DspButtonFn(hAn + 20, _SpcCursor, "<",   hButtonFont, 20, 20);
+			DspButtonFn(hAn + 21, _SpcCursor, ">",   hButtonFont, 20, 20);
+			DspButtonFn(hAn + 22, _SpcCursor, ">>",  hButtonFont, 20, 20);
+			DspButtonFn(hAn + 23, _SpcCursor, "@(Off)", hButtonFont, 30, 20);
+		END
+		DspPageButton();
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcScroll
+**
+**	This function is called when any of the Spc scroll buttons
+**	is pressed. It will move the Spc buffer in the required
+**	direction. Note that it assumes the buttons use the offsets
+**	12, 13, 14, 15.
+*/
+
+INT	TrnScrollArray[4] = -100, -50, 50, 100;
+
+INT
+FUNCTION
+_SpcScroll()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset, scroll;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40 - 12;
+		IF 0 <= offset AND offset < 4 THEN
+			scroll = TrnScrollArray[offset];
+			TrnScroll(-1, -1, scroll);
+		END
+	END
+	
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcCursor
+**
+**	This function is called when any of the Spc cursor buttons
+**	is pressed. It will move the Spc cursor in the required
+**	direction.
+*/
+
+INT	TrnCursorArray[4] = -1, -1, 1, 1;
+
+INT
+FUNCTION
+_SpcCursor()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset, samples;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40 - 19;
+		IF 0 <= offset AND offset < 4 THEN
+			samples = TrnCursorArray[offset];
+		ELSE
+			samples = 0;
+		END
+		TrnSetCursor(-1, samples);
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcMouseCursor
+**
+**	This function is called when the left mouse button is pressed.
+**	It will move the Spc cursor to the position of the mouse
+**	cursor.
+*/
+
+INT
+FUNCTION
+_SpcMouseCursor()
+	INT	x, y, xt, yt;
+	INT	hAn;
+	INT	i;
+	INT	offset;
+	INT	width;
+
+	DspGetMouse(x, y);
+	DspAnMove(255, x, y);
+
+	hAn = 40;
+	FOR i = 0 TO 3 DO
+		IF DspAnInRgn(255, hAn, hAn + 29) THEN
+			DspAnGetPos(hAn, xt, yt);
+			width = DspTrendInfo(DspAnInfo(hAn, 1), 3, hAn);
+			offset = (xt - x + width / 2) / width;
+			TrnSetCursorPos(-1, offset);
+			i = 4;
+		END
+		hAn = hAn + 40;
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SPCtag
+**
+**	This function is called when a new trend pen tag in entered.
+**	It will set the new pen name.
+**
+*/
+
+INT
+FUNCTION
+_SpcTag()
+	INT	hAnCursor;
+	INT	hAn;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		TrnSetPen(hAn, 0, Arg1);
+	END
+
+	RETURN 0;
+
+END
+
+/*
+**	FUNCTION NAME:	_SpcControlLimit
+**
+**	This function is called when a keyboard command is entered
+**	on one of the control limits. It will set the control limit
+**	to the user entered value. If "!" is entered then the control
+**	limits will be calculated automatically.
+*/
+
+INT
+FUNCTION
+_SpcControlLimit()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	offset;
+	INT     SPCType;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		offset = hAnCursor MOD 40;
+
+		IF offset = 1 THEN
+			SPCType = CICODE_SPC_XLCL;
+
+			IF hAn = 80 THEN
+				IF SPCPageType = SPC_MEAN_RANGE THEN
+					SPCType = CICODE_SPC_RLCL;
+				ELSE IF SPCPageType = SPC_MEAN_SDEV THEN
+					SPCType = CICODE_SPC_SLCL;
+				END END
+			END
+		ELSE IF offset = 5 THEN
+			SPCType = CICODE_SPC_XUCL;
+
+			IF hAn = 80 THEN
+				IF SPCPageType = SPC_MEAN_RANGE THEN
+					SPCType = CICODE_SPC_RUCL;
+				ELSE IF SPCPageType = SPC_MEAN_SDEV THEN
+					SPCType = CICODE_SPC_SUCL;
+				END END
+			END
+		ELSE IF offset = 3 THEN
+			SPCType = CICODE_SPC_XCL;
+
+			IF hAn = 80 THEN
+				IF SPCPageType = SPC_MEAN_RANGE THEN
+					SPCType = CICODE_SPC_RCL;
+				ELSE IF SPCPageType = SPC_MEAN_SDEV THEN
+					SPCType = CICODE_SPC_SCL;
+				END END
+			END
+		END END	END
+
+		IF Arg1 = "!" THEN
+			SPCSetLimit(hAn, SPCType, Arg1, AUTOMATIC_SET);
+		ELSE
+			SPCSetLimit(hAn, SPCType, Arg1, MANUAL_SET);
+                END
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcPeriod
+**
+**	This function is called when a keyboard command is entered
+**	on the Spc period. it sets the display period to the user
+**	entered value.
+*/
+
+INT
+FUNCTION
+_SpcPeriod()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	period;
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+		period = StrToPeriod(Arg1);
+		TrnSetPeriod(-1, period);
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcTime
+**
+**	This function is called when a keyboard command is entered
+**	on the Spc end time. It displays a form to get the time
+**	and data to scroll the Spc.
+**
+*/
+INT	bNowTime;
+INT	hTimeForm = -1;
+
+INT
+FUNCTION
+_SpcTime()
+	INT	hAnCursor;
+	INT	hAn;
+	INT	time;
+	STRING	sTime;
+	STRING	sDate;
+
+	IF hTimeForm >= 0 THEN
+		FormGoto(hTimeForm);
+		RETURN 0;
+	END
+
+	hAnCursor = KeyGetCursor();
+	IF hAnCursor > 40 THEN
+		hAn = (hAnCursor / 40) * 40;
+
+		bNowTime = FALSE;
+		time = TrnGetTime(hAn, 0, 0);
+		sTime = TimeToStr(time, 1);
+		sDate = TimeToStr(time, 2);
+
+		hTimeForm = FormNew("@(Spc Start Time)", 28, 4, 1);
+
+		FormInput(1, 0, "@(Time)" + ": ", sTime, 16);
+		FormInput(1, 1, "@(Date)" + ": ", sDate, 16);
+		FormButton(1, 3, "  " + "@(OK)" + "  ", 0, 1);
+		FormButton(10, 3, "@(Cancel)", 0, 2);
+		FormButton(20, 3, " " + "@(Now)" + "  ", _SpcButtonNow, 0);
+		
+		IF FormRead(0) = 0 THEN
+			time = StrToDate(sDate) + StrToTime(sTime);
+			IF (TrnSetTime(-1, -1, time) = 274) THEN		// should be checking for all cases!
+				Prompt("Invalid Time/Date passed to TrnSetTime");
+			END
+		END
+		hTimeForm = -1;
+
+		IF bNowTime THEN
+			IF (TrnSetTime(-1, -1, 0) = 274) THEN		// should be checking for all cases!
+				Prompt("Invalid Time/Date passed to TrnSetTime");
+			END
+		END
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcButtonNow
+**
+**	This function is called when the user selects "Now" button in the
+**	form displayed to set the end time. it sets the flag to indicate
+**	that the time is set to the current time.
+*/
+
+INT
+FUNCTION
+_SpcButtonNow()
+	INT	hForm;
+	INT	hField;
+
+	FormCurr(hForm, hField);
+	bNowTime = TRUE;
+	FormDestroy(hForm);
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	SpcPageButton
+**	
+**	This function sets buttons to go to the next and previos pages.
+*/
+
+FUNCTION
+SpcPageButton()
+
+	IF StrToInt(PageInfo(7)) = 0 THEN
+		DspButtonFn(19, ButtonPageNext, "@(Page Up)",   hButtonFont, 57, 19);
+		DspButtonFn(20, ButtonPagePrev, "@(Page Dn)",   hButtonFont, 57, 19);
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcUpdate
+**	
+**	This function is called as a task when an Spc page is entered.
+**	It will update Spc values as they are recalculated at every
+**	period times subgroup size duration. When Spc is scrolled into
+**	the past update will stop untill it is scrolled back to the 
+**	present time.
+*/
+
+INT	TRN_MODE_REALTIME = 0;
+
+FUNCTION
+_SpcUpdate()
+
+	INT 	SubGroupSize;
+	INT 	SleepSec;
+
+	SubGroupSize = ParameterGet("SPC", "SubGroupSize", "5");
+
+	WHILE 1 DO
+
+		IF TrnGetMode(30, 0) = TRN_MODE_REALTIME THEN
+			TrnScroll(-1, -1, 100);
+		END
+
+		SleepSec = TrnGetPeriod(30) * SubGroupSize;
+		Sleep(SleepSec);
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcInitUpdate
+**	
+**	Initialize the spc update task. The task is created when
+**	the page is first displayed.
+**
+*/
+
+FUNCTION
+_SpcInitUpdate()
+
+	IF PageGetInt(0) = 0 THEN
+		TaskNew("_SpcUpdate", "", 1);
+		PageSetInt(0, 1) = 1;
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_SpcGetPenFont
+**	
+**	Get the font for the given pen and extension.
+*/
+
+INT
+FUNCTION
+_SpcGetPenFont(INT hAn, STRING sExt)
+	INT	hPen;
+	INT	hPenFont;
+
+	hPen = TrnGetPenNo(hAn, TrnGetPen(hAn, 0) + sExt);
+	if hPen = 0 THEN
+		hPenFont = hPenArray[0];
+	ELSE
+		hPenFont = hPenArray[hPen - 1];
+	END
+
+	return hPenFont;
+END
+
+/*
+**	FUNCTION NAME: SpcSetControlLimit
+**
+**	Allows control limits to be set via keyboard or numeric pad on screen.
+*/
+
+FUNCTION
+SpcSetControlLimit(INT hAn,INT SPCType,STRING Inkey = "")
+        INT     Setting;
+        INT     Value;
+
+	IF Inkey = "" THEN
+		Value = StrToInt(FormNumPad("@(Control Limit)",Value,20));
+		ELSE Value = StrToInt(Inkey);
+	END
+        
+        IF Inkey = "!" THEN
+                Setting = AUTOMATIC_SET;
+                ELSE Setting = MANUAL_SET;
+        END
+        
+        SPCSetLimit(hAn,SPCType,Value,Setting);
+END
+
+
+FUNCTION DspSpcLimit( INT hSPCAn, INT SPCType )
+
+        INT     iFont;
+        INT     iPenNo;
+        STRING  sBasePen;
+        INT     iWidth;
+        INT     iDec;
+        INT     hAn;
+        
+
+	hAN = DspGetANCur();
+        
+        sBasePen = TrnGetPen( hSPCAn, 0 );
+        
+        IF SPCType > 6 THEN
+                iFont = DspFont("Courier", 10, YELLOW, TRANSPARENT);
+
+                IF SPCType = CICODE_SPC_XCL THEN
+                        iPenNo = TrnGetPenNo( hSPCAn, sBasePen + ".XCL" );
+                END
+                IF SPCType = CICODE_SPC_RCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".RCL");
+                END
+                IF SPCType = CICODE_SPC_SCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".SCL");
+                END
+        END
+        IF SPCType < 7 THEN
+                iFont = DspFont("Courier", 10, LIGHT_RED, TRANSPARENT);
+                
+                IF SPCType = CICODE_SPC_XUCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".XUCL");
+                END
+                IF SPCType = CICODE_SPC_XLCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".XLCL");
+                END
+                IF SPCType = CICODE_SPC_RUCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".RUCL");
+                END
+                IF SPCType = CICODE_SPC_RLCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".RLCL");
+                END
+                IF SPCType = CICODE_SPC_SUCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".SUCL");
+                END
+                IF SPCType = CICODE_SPC_SLCL THEN
+                        iPenNo = TrnGetPenNo(hSPCAn, sBasePen + ".SLCL");
+                END
+        END
+        
+	TrnGetFormat( hSPCAn, iPenNo, iWidth, iDec );
+
+	ErrSet(1);
+        DspText(hAn, iFont, SPCRealToStr(TrnGetBufValue(hSPCAn, iPenNo, 0), iWidth, iDec));
+	ErrSet(0);
+        
+END
+
+FUNCTION
+SpcRun()
+	IF PageGetInt(0) = 0 THEN
+		TaskNew("_SpcUpdate", "", 1);
+		PageSetInt(0, 1) = 1;
+	END
+	TrendRun();
+END
+
+/*
+**	FUNCTION NAME:	SPCRealToStr
+**
+**	Converts a real value to a string with a specified number
+**	of decimal places. Returns "<na>" if the value = TRN_NO_VALUE
+**	or TRN_INVALID.
+*/
+
+STRING
+FUNCTION
+SPCRealToStr(REAL fValue, INT iWidth, INT nPlaces)
+
+	STRING sResult;
+
+	IF TrnIsValidValue(fValue) = 0 THEN
+		sResult = RealToStr(fValue, iWidth, nPlaces);
+	ELSE
+		sResult = "<na>";
+	END
+
+	RETURN sResult;
+END

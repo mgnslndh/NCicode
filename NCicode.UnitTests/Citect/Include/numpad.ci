@@ -1,0 +1,375 @@
+/*
+** FILENAME :		NUMPAD.CI
+**
+**
+** DESCRIPTION :	This file contains cicode functions that are used
+**			on the forms with keypads.
+*/
+
+INT	hNumPadForm = -1;
+INT 	bNumPadClear = TRUE;
+STRING	sNumpadValue = "";
+STRING	sTimeDel = ":";		/* Time delimiter default value */
+STRING	sDecimalDel = "."; 	/* Decimal delimiter default value */
+STRING	sDateDel = "/";		/* Date delimiter default value */
+
+/*
+** FUNCTION :		FormNumPad
+**
+**	This function generates a form that allows the user
+**	to enter values through a number pad.
+**
+**	The function supports the following modes
+**
+**		0	Normal keypad
+**		1	With a Password style edit field.
+**		2	Mode not yet implemented
+**		4	With "+/-" button.
+**		8	With "/" button.
+**		16	With "." button.
+**		32	With ":" button, not compatable with mode "+/-".
+**		64	With "AM" and "PM" buttons, not compatable with mode "/" or "."
+**		128	With "Now" button, 
+**		512	With "1hr", "2hr", "8hr", "24hr" buttons, not compatable with mode "Now"
+**
+** 	Returns the string of value entered through the keypad if closed with the accept button or
+**	a null string if closed any other way.
+**
+*/
+
+STRING 
+FUNCTION FormNumPad(STRING sTitle, STRING sInput, INT iMode = 0)
+
+	STRING  sVoid;
+	INT	nExtraRows = 0;
+
+	sTimeDel = StrLeft(WndGetFileProfile("Intl", "sTime", ":", "win.ini"), 1);
+	IF StrLeft(ParameterGet("Intl", "bDecimal", "1"), 1) = "1" THEN
+		sDecimalDel = StrLeft(WndGetFileProfile("Intl", "sDecimal", ".", "win.ini"), 1);
+	ELSE
+		sDecimalDel = StrLeft(ParameterGet("Intl", "sDecimal", "."), 1);
+	END
+	sDateDel = StrLeft(WndGetFileProfile("Intl", "sDate", "/", "win.ini"), 1);
+
+	sNumPadValue = sInput;
+	bNumPadClear = TRUE;
+
+        IF (iMode bitand 4) OR (iMode bitand 8) OR (iMode bitand 16) OR (iMode bitand 32) OR (iMode bitand 64) THEN
+               	nExtraRows = 1;
+        END
+        IF (iMode bitand 128) OR (iMode bitand 512) THEN
+             	nExtraRows = 2;
+        END
+        
+        IF hNumPadForm = -1 THEN
+	        hNumPadForm = FormNew(sTitle, 18, 9 + nExtraRows, (8+16));
+                IF hNumPadForm > -1 THEN
+                        _NumPadPosition();
+
+                        FormField(0,  8 + nExtraRows, 6, 1, 5, sVoid, "&" + "@(OK)", 0);
+                        FormField(7,  8 + nExtraRows, 11, 1, 6, sVoid, "&" + "@(Cancel)", 0);
+
+                        FormField(0,  0, 18,10 + nExtraRows,    7, sVoid, "",           0);
+
+			IF (iMode bitand 1) THEN
+                        	FormField(2, 1, 14,  1, 2, sNumPadValue, "", _NumPadKey1);
+			ELSE IF (iMode bitand 64) OR (iMode bitand 128) OR (iMode bitand 512) THEN
+                        	FormField(2, 1, 14,  1, 1, sNumPadValue, "", _NumPadKey1);
+			ELSE IF (iMode bitand 32) THEN
+                        	FormField(2, 1, 14,  5, 14, sNumPadValue, "", _NumPadKey1);
+				FormAddList("02:00:00");
+				FormAddList("00:02:00");
+				FormAddList("00:00:02");
+				FormAddList("0.100");
+				FormAddList("0.500");
+			ELSE
+                        	FormField(2, 1, 14,  1, 1, sNumPadValue, "", _NumPadKey1);
+			END END END
+
+	                IF (iMode bitand 2) THEN
+        	                ! NYI
+                        END
+                        IF (iMode bitand 4) THEN
+                                FormField(2, 7, 4, 1, 4, sVoid, "+/-", _NumPadKeySign);
+                        END
+                        IF (iMode bitand 8) THEN
+                                FormField(7, 7, 4, 1, 4, sVoid, "&" + sDateDel, _NumPadKeyDateDel);
+                        END
+                        IF (iMode bitand 16) THEN
+                                FormField(12, 7, 4, 1, 4, sVoid, "&" + sDecimalDel, _NumPadKeyDecimalDel);
+                        END
+                        IF (iMode bitand 32) THEN
+                                FormField(2,  7, 4, 1, 4, sVoid, "&" + sTimeDel, _NumPadKeyTimeDel);
+                        END
+                        IF (iMode bitand 64) THEN
+                                FormField(7, 7, 4, 1, 4, sVoid, "&AM", _NumPadKeyAM);
+                                FormField(12, 7, 4, 1, 4, sVoid, "&PM", _NumPadKeyPM);
+                        END
+                        IF (iMode bitand 128) THEN
+                                FormField(2, 8, 14, 1, 4, sVoid, "&" + "@(Now)", _NumPadKeyNow);
+                        END		        
+                        IF (iMode bitand 512) THEN
+                                FormField(2, 8, 4, 1, 4, sVoid, "1hr", _NumPadKey1hr);
+                                FormField(7, 8, 4, 1, 4, sVoid, "2hr", _NumPadKey2hr);
+                                FormField(12, 8, 4, 1, 4, sVoid, "8hr", _NumPadKey8hr);
+                        END		        
+
+                        FormField(2,  5, 4, 1,                  4, sVoid, "&1",         _NumPadKey1);
+                        FormField(7,  5, 4, 1,                  4, sVoid, "&2",         _NumPadKey2);
+                        FormField(12, 5, 4, 1,                  4, sVoid, "&3",         _NumPadKey3);
+                        FormField(2,  4, 4, 1,                  4, sVoid, "&4",         _NumPadKey4);
+                        FormField(7,  4, 4, 1,                  4, sVoid, "&5",         _NumPadKey5);
+                        FormField(12, 4, 4, 1,                  4, sVoid, "&6",         _NumPadKey6);
+                        FormField(2,  3, 4, 1,                  4, sVoid, "&7",         _NumPadKey7);
+                        FormField(7,  3, 4, 1,                  4, sVoid, "&8",         _NumPadKey8);
+                        FormField(12, 3, 4, 1,                  4, sVoid, "&9",         _NumPadKey9);
+                        FormField(2,  6, 4, 1,                  4, sVoid, "&0",	        _NumPadKey0);
+                        FormField(7,  6, 4, 1,                  4, sVoid, "<-",	        _NumPadKeyBack);
+                        FormField(12, 6, 4, 1,                  4, sVoid, "C&lr",       _NumPadKeyReset);
+
+                        IF (FormRead(0) <> 0) THEN
+                        	sNumPadValue = sInput;
+                        	ErrSetHw(-1,299);
+                        ELSE
+                        	IsError();	// For tags on disk PLCs with a non zero minimum value the default value will be zero which causes an "out of range" error which much be cleared to allow the new value to be set
+                        END
+   
+			hNumPadForm = -1;
+			
+                        RETURN sNumPadValue;
+		END                
+	END
+        RETURN sNumPadValue;
+        
+END
+
+FUNCTION
+_NumPadPosition()
+	INT	nCurPosX = 0;
+	INT nCurPosY = 0;
+	INT	nFormWidth = 189;
+	INT	nFormHeight = 363;
+	INT nTotalMonitors = WndInfo(80);
+	INT nCurrentMonitor = 1;
+	INT nMonitorTop = -1;
+	INT nMonitorBottom = -1;
+	INT nMonitorLeft = -1;
+	INT nMonitorRight = -1;
+	INT nXMax = 0;
+	INT nYMax = 0;
+	INT nTop = 0;
+	INT nBottom = 0;
+	INT nLeft = 0;
+	INT nRight = 0;
+
+	// Obtain the screen co-ordinates of the cursor
+	DspAnGetPos(KeyGetCursor(), nCurPosX, nCurPosY);
+	PageTransformCoords(WinNumber(), nCurPosX, nCurPosY, nCurPosX, nCurPosY, 0);
+	
+	// Find the monitor that the co-ordinates are located on
+	WHILE (nCurrentMonitor < nTotalMonitors + 1) DO
+		nTop = WndMonitorInfo(nCurrentMonitor, 1);
+		nBottom = nTop + WndMonitorInfo(nCurrentMonitor, 3);
+		nLeft = WndMonitorInfo(nCurrentMonitor, 0);
+		nRight = nLeft + WndMonitorInfo(nCurrentMonitor, 2);
+		
+		IF nCurPosX > nLeft AND nCurPosX < nRight THEN
+			IF nCurPosY > nTop AND nCurPosY < nBottom THEN
+				nMonitorTop = nTop;
+				nMonitorBottom = nBottom;
+				nMonitorLeft = nLeft;
+				nMonitorRight = nRight;			
+			END
+		END
+		nCurrentMonitor = nCurrentMonitor + 1;
+	END
+		
+	IF nMonitorTop <> - 1 THEN
+		// Work out the maximum co-ordinates to place the popup without it going off the window
+		nXMax = nMonitorRight - nFormWidth ;
+		nYMax = nMonitorBottom - nFormHeight;
+		
+		IF nCurPosX > nXMax THEN
+			nCurPosX = nXMax;
+		END
+		
+		IF nCurPosY > nYMax THEN
+			 nCurPosY = nYMax;
+		END
+		// Only set the form position if we could locate the monitor on which it is being launched
+		// otherwise the form will appear in the default FormNew position.
+		FormPosition(nCurPosX , nCurPosY, 0);	
+	END	
+END
+
+FUNCTION _NumPadGetData(STRING char)
+	IF bNumPadClear THEN
+		sNumPadValue = "";
+		bNumPadClear = FALSE;
+	ELSE
+		FormGetData(hNumPadForm);
+	END
+	sNumPadValue = sNumPadValue + char;
+	FormSetData(hNumPadForm);
+END
+
+/*
+** FUNCTION :	Key Callback functions
+**
+** 	The following functions are callback functions for FormNumPad.
+**	They update the value of the global variable sNumPadValue.
+*/
+
+INT FUNCTION _NumPadKey1()
+	_NumPadGetData("1");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey2()
+	_NumPadGetData("2");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey3()
+	_NumPadGetData("3");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey4()
+	_NumPadGetData("4");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey5()
+	_NumPadGetData("5");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey6()
+	_NumPadGetData("6");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey7()
+	_NumPadGetData("7");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey8()
+	_NumPadGetData("8");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey9()
+	_NumPadGetData("9");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey0()
+	_NumPadGetData("0");
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyTimeDel()
+	_NumPadGetData(sTimeDel);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeySign()
+	INT	iLength;
+	STRING	sSign = "+";
+	_NumPadGetData("");
+	
+	IF (StrLeft(sNumPadValue, 1) = "+") THEN
+		iLength = StrLength(sNumPadValue);
+		sNumPadValue = StrRight(sNumPadValue, (iLength-1));
+		sSign = "-";
+	END
+	IF (StrLeft(sNumPadValue, 1) = "-") THEN
+		iLength = StrLength( sNumPadValue);
+		sNumPadValue = StrRight(sNumPadValue, (iLength-1));
+		sSign = "+";
+	END
+	sNumPadValue = sSign + sNumPadValue;
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyDateDel()
+	_NumPadGetData(sDateDel);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyDecimalDel()
+	_NumPadGetData(sDecimalDel);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyReset()
+	sNumPadValue = "";
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyBack()
+	INT	iLength;
+	FormGetData(hNumPadForm);
+	iLength = StrLength(sNumPadValue);
+	IF iLength > 0 THEN
+		sNumPadValue = StrLeft(sNumPadValue, (iLength-1));
+	END
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyAM()
+	INT	iLength;
+	FormGetData(hNumPadForm );
+	IF ((StrRight(sNumPadValue, 3)=" AM") OR (StrRight(sNumPadValue, 3)=" PM")) THEN
+		iLength = StrLength(sNumPadValue);
+		sNumPadValue = StrLeft( sNumPadValue, (iLength-3) );
+	END
+	sNumPadValue = sNumPadValue + " AM";
+	FormSetData(hNumPadForm );
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyPM()
+	INT	iLength;
+	FormGetData(hNumPadForm );
+	IF ((StrRight(sNumPadValue, 3)=" AM") OR (StrRight(sNumPadValue, 3)=" PM")) THEN
+		iLength = StrLength(sNumPadValue);
+		sNumPadValue = StrLeft(sNumPadValue, (iLength-3));
+	END
+	sNumPadValue = sNumPadValue + " PM";
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKeyNow()
+	bNumPadClear = FALSE;
+	sNumPadValue = Time(1);
+	FormSetData(hNumPadForm );
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey1hr()
+	bNumPadClear = FALSE;
+	sNumPadValue = "01" + sTimeDel + "00" + sTimeDel + "00";
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey2hr()
+	bNumPadClear = FALSE;
+	sNumPadValue = "02" + sTimeDel + "00" + sTimeDel + "00";
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END
+
+INT FUNCTION _NumPadKey8hr()
+	bNumPadClear = FALSE;
+	sNumPadValue = "08" + sTimeDel + "00" + sTimeDel + "00";
+	FormSetData(hNumPadForm);
+	RETURN 0;
+END

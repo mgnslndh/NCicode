@@ -1,0 +1,2354 @@
+//********************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   October 2000
+//
+//      REVISION:
+//
+//      NOTES:
+//              This module is to define a user alarm query function and create an
+//              alarm filteruser interface. It is desinged for active, summary and
+//              disabled alarms.
+//              AlarmFilterForm(0, 0, 0) for active alarms
+//              AlarmFilterForm(1, 0, 0) for summary alarms
+//              AlarmFilterForm(2, 0, 0) for disbaled alarms
+//********************************************************************************************
+
+// CONSTANTS
+
+INT c_WINDOWS_MAX	= 20;            // maximum number of windows supported
+
+
+// MODULE VARIABLES
+
+// The following parameters are required to be retainable for each alarm page
+// as a user wants to know what previous filter has been used.
+// Module variables start with "m_";
+// _sa string for active alarms
+// _ss string for summary alarms
+// _sd string for disabled alarms
+
+STRING m_sShiftCfg[4] = "(07:00:00) -> (15:00:00) Morning", "(15:00:00) -> (23:00:00) Afternoon", "(23:00:00) -> (07:00:00) Night", "";
+INT m_nShiftInitFlag = 0;
+INT m_nNumShifts = 3;
+
+STRING m_sTimeDel = "";              // Time delimiter
+STRING m_sDateDel = "";              // Date delimiter
+STRING m_sDateFormat = "";           // Date format
+
+INT m_nAlarmInfo[20];                // Alarm Info for each window instance: 0 for Active; 1 for Summary; 2 for Disabled
+INT m_hForm[20];                     // Active Form handle for each window instance
+INT m_FormDataInited[20];            // Flag to indicate if an instance of form data is initialized
+
+STRING m_sachkArea[20];              // Active alarm - <Area> Checkbox
+STRING m_sachkCategory[20];          // Active alarm - <Category> Checkbox
+STRING m_sachkDate[20];              // Active alarm - <Date> Checkbox
+STRING m_sachkName[20];              // Active alarm - <Name> Checkbox
+STRING m_sachkState[20];             // Active alarm - <State> Checkbox
+STRING m_sachkTag[20];               // Active alarm - <Tag> Checkbox
+STRING m_sachkType[20]               // Active alarm - <Type> Checkbox
+STRING m_safldArea[20];              // Active alarm - <Area> Field
+STRING m_safldCategory[20];          // Active alarm - <Category> Field
+STRING m_safldName[20];              // Active alarm - <Name> Field
+STRING m_sacboState[20];             // Active alarm - <State> ComboBox
+STRING m_safldTag[20];               // Active alarm - <Tag> Field
+STRING m_sacboType[20];              // Active alarm - <Type> ComboBox
+STRING m_safldDate1[20];             // Active alarm - Year start string
+STRING m_safldDate2[20];             // Active alarm - Year end string
+STRING m_safldTime1[20];             // Active alarm - Hour start string
+STRING m_safldTime2[20];             // Active alarm - Hour end string
+STRING m_saYear1[20];                // Active alarm - Year start string
+STRING m_saYear2[20];                // Active alarm - Year end string
+STRING m_saMonth1[20];               // Active alarm - Month start string
+STRING m_saMonth2[20];               // Active alarm - Month end string
+STRING m_saDay1[20];                 // Active alarm - Day start string
+STRING m_saDay2[20];                 // Active alarm - Day end string
+STRING m_saHour1[20];                // Active alarm - Hour start string
+STRING m_saHour2[20];                // Active alarm - Hour end string
+STRING m_saMin1[20];                 // Active alarm - Minute start string
+STRING m_saMin2[20];                 // Active alarm - Minute end string
+STRING m_saSec1[20];                 // Active alarm - Second start string
+STRING m_saSec2[20];                 // Active alarm - Second end string
+STRING m_sacboDTOpt[20];             // Active alarm - Date time search options
+STRING m_sacboShiftInfo[20];         // Active alarm - Shift information	
+
+STRING m_sschkArea[20];              // Summary alarm - <Area> Checkbox
+STRING m_sschkCategory[20];          // Summary alarm - <Category> Checkbox
+STRING m_sschkDate[20];              // Summary alarm - <Date> Checkbox
+STRING m_sschkName[20];              // Summary alarm - <Name> Checkbox
+STRING m_sschkState[20];             // Summary alarm - <State> Checkbox
+STRING m_sschkTag[20];               // Summary alarm - <Tag> Checkbox
+STRING m_sschkType[20]               // Summary alarm - <Type> Checkbox
+STRING m_ssfldArea[20];              // Summary alarm - <Area> Field
+STRING m_ssfldCategory[20];          // Summary alarm - <Category> Field
+STRING m_ssfldName[20];              // Summary alarm - <Name> Field
+STRING m_sscboState[20];             // Summary alarm - <State> ComboBox
+STRING m_ssfldTag[20];               // Summary alarm - <Tag> Field
+STRING m_sscboType[20];              // Summary alarm - <Type> ComboBox
+STRING m_ssfldDate1[20];             // Summary alarm - Year start string
+STRING m_ssfldDate2[20];             // Summary alarm - Year end string
+STRING m_ssfldTime1[20];             // Summary alarm - Hour start string
+STRING m_ssfldTime2[20];             // Summary alarm - Hour end string
+STRING m_ssYear1[20];                // Summary alarm - Year start string
+STRING m_ssYear2[20];                // Summary alarm - Year end string
+STRING m_ssMonth1[20];               // Summary alarm - Month start string
+STRING m_ssMonth2[20];               // Summary alarm - Month end string
+STRING m_ssDay1[20];                 // Summary alarm - Day start string
+STRING m_ssDay2[20];                 // Summary alarm - Day end string
+STRING m_ssHour1[20];                // Summary alarm - Hour start string
+STRING m_ssHour2[20];                // Summary alarm - Hour end string
+STRING m_ssMin1[20];                 // Summary alarm - Minute start string
+STRING m_ssMin2[20];                 // Summary alarm - Minute end STRING
+STRING m_ssSec1[20];                 // Summary alarm - Second start string 
+STRING m_ssSec2[20];                 // Summary alarm - Second end string
+STRING m_sscboDTOpt[20];             // Summary alarm - Date time search options
+STRING m_sscboShiftInfo[20];         // Summary alarm - Shift information	
+STRING m_ssOnDateOpt[20];            // Summary OnDateTime option
+STRING m_ssOffDateOpt[20];           // Summary OffDateTime option
+STRING m_ssAckDateOpt[20];           // Summary AckDateTime option
+
+STRING m_sdchkArea[20];              // Disabled alarm - <Area> Checkbox
+STRING m_sdchkCategory[20];          // Disabled alarm - <Category> Checkbox
+STRING m_sdchkDate[20];              // Disabled alarm - <Date> Checkbox
+STRING m_sdchkName[20];              // Disabled alarm - <Name> Checkbox
+STRING m_sdchkState[20];             // Disabled alarm - <State> Checkbox
+STRING m_sdchkTag[20];               // Disabled alarm - <Tag> Checkbox
+STRING m_sdchkType[20]               // Disabled alarm - <Type> Checkbox
+STRING m_sdfldArea[20];              // Disabled alarm - <Area> Field
+STRING m_sdfldCategory[20];          // Disabled alarm - <Category> Field
+STRING m_sdfldName[20];              // Disabled alarm - <Name> Field
+STRING m_sdcboState[20];             // Disabled alarm - <State> ComboBox
+STRING m_sdfldTag[20];               // Disabled alarm - <Tag> Field
+STRING m_sdcboType[20];              // Disabled alarm - <Type> ComboBox
+STRING m_sdfldDate1[20];             // Disabled alarm - Year start string
+STRING m_sdfldDate2[20];             // Disabled alarm - Year end string
+STRING m_sdfldTime1[20];             // Disabled alarm - Hour start string
+STRING m_sdfldTime2[20];             // Disabled alarm - Hour end string
+STRING m_sdYear1[20];                // Disabled alarm - Year start string
+STRING m_sdYear2[20];                // Disabled alarm - Year end string
+STRING m_sdMonth1[20];               // Disabled alarm - Month start string
+STRING m_sdMonth2[20];               // Disabled alarm - Month end string
+STRING m_sdDay1[20];                 // Disabled alarm - Day start string
+STRING m_sdDay2[20];                 // Disabled alarm - Day end string
+STRING m_sdHour1[20];                // Disabled alarm - Hour start string
+STRING m_sdHour2[20];                // Disabled alarm - Hour end string
+STRING m_sdMin1[20];                 // Disabled alarm - Minute start string
+STRING m_sdMin2[20];                 // Disabled alarm - Minute end STRING
+STRING m_sdSec1[20];                 // Disabled alarm - Second start string 
+STRING m_sdSec2[20];                 // Disabled alarm - Second end string
+STRING m_sdcboDTOpt[20];             // Disabled alarm - Date time search options
+STRING m_sdcboShiftInfo[20];         // Disabled alarm - Shift information		
+
+
+//********************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AlarmQuery
+//
+//      ARGUMENTS
+//              nRID   -    alarm record number used by AlarmSetQuery function.
+//              sPrefix -   "" for active alarm; "On", "Off" and "Ack" for summary
+//                          alarm using different date/time fields.
+//              chk_x     - checkbox value (filter options)
+//              fld_x     - fieldbox value (filter strings)
+//              Date1/Time1 - date/time lower boundaries
+//              Date2/Time2 - date/time upper boundaries
+//      NOTES:
+//              This function creates a uer defined alarm query function. Its name is passed
+//              to AlarmSetQuery along with its arguments.
+//********************************************************************************************
+INT
+FUNCTION
+AlarmQuery(INT nRID, INT nVer,INT chk_1, STRING fld_1, INT chk_2, STRING fld_2, INT chk_3,INT Date1, INT Date2, INT Time1,INT Time2,INT chk_4,STRING fld_4,INT chk_5,STRING fld_5,INT chk_6,STRING fld_6,INT chk_7,STRING fld_7,STRING sPrefix,INT nDTOption)
+    INT FT_1 = TRUE;
+    INT FT_2 = TRUE;
+    INT FT_3 = TRUE;
+    INT FT_4 = TRUE;
+    INT FT_5 = TRUE;
+    INT FT_6 = TRUE;
+    INT FT_7 = TRUE;
+    INT nDateTime;
+    INT nDate;
+    INT nTime;
+    INT nStrLen;
+    INT bResult;
+    STRING sFieldX;
+    STRING sLike;
+    STRING sDate;
+    STRING sTime;
+    STRING sDateField = "Date";
+    STRING sTimeField = "Time";
+
+
+    If chk_1 = 1 Then
+        FT_1 = (fld_1 = AlarmGetFieldRec(nRID, "Area", nVer));
+    End
+
+    If chk_2 = 1 Then
+        FT_2 = (fld_2 = AlarmGetFieldRec(nRID, "Category", nVer));
+    End
+
+    If chk_3 = 1 Then
+        sDateField = sPrefix + sDateField;
+        sTimeField = sPrefix + sTimeField;
+        sDate = AlarmGetFieldRec(nRID, sDateField, nVer);
+        sTime = AlarmGetFieldRec(nRID, sTimeField, nVer);
+        Select Case nDTOption
+        CASE 1
+            /*"1 - DATETIME":  Date and time are treated as single field */
+            nDateTime = StrToDate(sDate) + StrToTime(sTime);
+            FT_3 = (nDateTime >= (Date1 + Time1) AND nDateTime <= (Date2 + Time2));
+        Case 2
+            /*"2 - DATE ONLY"*/
+            nDate = StrToDate(sDate);
+            FT_3 = (nDate >= Date1 AND nDate <= Date2);
+        Case 3
+            /*"3 - TIME ONLY"*/
+            nTime = StrToTime(sTime);
+            If Time2 < Time1 Then
+                FT_3 = (nTime >= Time1 AND nTime <= 86400 OR nTime <= Time2);
+            Else
+                FT_3 = (nTime >= Time1 AND nTime <= Time2);
+            End
+        CASE 4
+            /*"4 - DATE & TIME":  Date and time are treated as separate fields*/
+            nDate = StrToDate(sDate);
+            nTime = StrToTime(sTime);
+            If Time2 < Time1 Then
+                FT_3 = (nDate >= Date1 AND nDate <= Date2 AND (nTime >= Time1 AND nTime <= 86400 OR nTime <= Time2));
+            Else
+                FT_3 = (nDate >= Date1 AND nDate <= Date2 AND nTime >= Time1 AND nTime <= Time2);
+            End
+        End Select
+    End
+
+    If chk_4 = 1 Then
+        sFieldX = StrUpper(AlarmGetFieldRec(nRID, "Name", nVer));
+		sLike = StrUpper(fld_4);
+		IF StrRight(sLike, 1) = "*" THEN
+			nStrLen = StrLength(sLike) - 1;
+			sLike = StrLeft(sLike, nStrLen);
+			sFieldX = StrLeft(sFieldX, nStrLen);
+	        FT_4 = (sFieldX = sLike);
+	    ELSE
+	        FT_4 = (StrSearch(0, sFieldX, sLike) > -1);
+	    END
+    End
+
+    If chk_5 = 1 Then
+        If sPrefix = "" Then
+            FT_5 = (fld_5 = AlarmGetFieldRec(nRID, "State", nVer));
+        Else
+            FT_5 = (fld_5 = AlarmGetFieldRec(nRID, "SumState", nVer));
+        End
+    End
+
+    If chk_6 = 1 Then
+        sFieldX = StrUpper(AlarmGetFieldRec(nRID, "Tag", nVer));
+		sLike = StrUpper(fld_6);
+		IF StrRight(sLike, 1) = "*" THEN
+			nStrLen = StrLength(sLike) - 1;
+			sLike = StrLeft(sLike, nStrLen);
+			sFieldX = StrLeft(sFieldX, nStrLen);
+	        FT_6 = (sFieldX = sLike);
+	    ELSE
+	        FT_6 = (StrSearch(0, sFieldX, sLike) > -1);
+	    END
+    End
+
+    If chk_7 = 1 Then
+        If sPrefix = "" Then
+	        FT_7 = (fld_7 = AlarmGetFieldRec(nRID, "Type", nVer));
+        Else
+	        FT_7 = (fld_7 = AlarmGetFieldRec(nRID, "SumType", nVer));
+        End
+    End
+
+    bResult = (FT_1 AND FT_2 AND FT_3 AND FT_4 AND FT_5 AND FT_6 AND FT_7);
+
+    RETURN bResult;
+End
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AddListItem
+//
+//      NOTES:
+//              Used by Function AlarmFilterForm() to add Date and Time Items
+//
+//*******************************************************************************************
+
+FUNCTION AddListItem(INT nStart, INT nEnd, INT nStep)
+    STRING sItem;
+    INT I;
+    
+    
+    I = nStart;
+    WHILE I <= nEnd DO
+	sItem = I:#0;
+        FormAddList(sItem);
+        I = I + nStep;
+    End
+    
+End
+
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AddZeroFront
+//
+//      NOTES:
+//              Used by Function InitDateTime(). It adds "0" in front if integer less than
+//              10 and returns a string in "dd" or "hh" or "mm" or "ss".
+//
+//*******************************************************************************************
+
+STRING FUNCTION AddZeroFront(INT Number)
+	STRING sResult;
+    If Number < 10 Then
+        sResult = "0" + IntToStr(Number);
+    Else
+        sResult = IntToStr(Number);
+    End
+    RETURN sResult;
+End
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              InitDateTime
+//
+//      NOTES:
+//              Used by Function AlarmFilterForm(). It initialises all year, month, day, hour,
+//              minute, and second variables if they are empty strings. Otherwise, they
+//              are retainable (changed by users). By default, data range is one hour.
+//
+//*******************************************************************************************
+Function InitDateTime(INT nIndex, INT hData)
+	INT nTemp;
+	INT nDateTime1;
+	INT nDateTime2;
+
+    nDateTime2 = TimeCurrent();
+    /* DateTime format is in Sec - long integer - can be directly add/sub ed*/
+    nDateTime1 = nDateTime2 - 3600;
+    SELECT CASE nIndex
+    CASE 0	/* Active Alarm */
+		If m_safldDate1[hData] = "" Or m_safldDate2[hData] = "" THEN
+			m_safldDate1[hData] = TimeToStr(nDateTime1, 9);
+			m_safldDate2[hData] = TimeToStr(nDateTime2, 9);
+		End
+		If m_safldTime1[hData] = "" Or m_safldTime2[hData] = "" THEN
+			m_safldTime1[hData] = TimeToStr(nDateTime1, 1);
+			m_safldTime2[hData] = TimeToStr(nDateTime2, 1);
+		END
+		If m_saYear1[hData] = "" Or m_saYear2[hData] = "" THEN
+			nTemp = DateYear(nDateTime1, 1);
+			m_saYear1[hData] = IntToStr(nTemp);
+			nTemp = DateYear(nDateTime2, 1);
+			m_saYear2[hData] = IntToStr(nTemp);
+		END
+		If m_saMonth1[hData] = "" Or m_saMonth2[hData] = "" THEN
+			nTemp = DateMonth(nDateTime1);
+			m_saMonth1[hData] = AddZeroFront(nTemp);
+			nTemp = DateMonth(nDateTime2);
+			m_saMonth2[hData] = AddZeroFront(nTemp);
+		END
+		If m_saDay1[hData] = "" Or m_saDay2[hData] = "" THEN
+			nTemp = DateDay(nDateTime1);
+			m_saDay1[hData] = AddZeroFront(nTemp);
+			nTemp = DateDay(nDateTime2);
+			m_saDay2[hData] = AddZeroFront(nTemp);
+		END
+		If m_saHour1[hData] = "" Or m_saHour2[hData] = "" THEN
+			nTemp = TimeHour(nDateTime1);
+			m_saHour1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeHour(nDateTime2);
+			m_saHour2[hData] = AddZeroFront(nTemp);
+		END
+		If m_saMin1[hData] = "" OR m_saMin1[hData] = "" THEN
+			nTemp = TimeMin(nDateTime1);
+			m_saMin1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeMin(nDateTime2);
+			m_saMin2[hData] = AddZeroFront(nTemp);
+		END
+		If m_saSec1[hData] = "" Or m_saSec1[hData] = "" THEN
+			nTemp = TimeSec(nDateTime1);
+			m_saSec1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeSec(nDateTime2);
+			m_saSec2[hData] = AddZeroFront(nTemp);
+		END
+    CASE 1	/* Summary Alarm */
+		If m_ssfldDate1[hData] = "" Or m_ssfldDate2[hData] = "" Then
+			m_ssfldDate1[hData] = TimeToStr(nDateTime1, 9);
+			m_ssfldDate2[hData] = TimeToStr(nDateTime2, 9);
+		End
+		If m_ssfldTime1[hData] = "" Or m_ssfldTime2[hData] = "" Then
+			m_ssfldTime1[hData] = TimeToStr(nDateTime1, 1);
+			m_ssfldTime2[hData] = TimeToStr(nDateTime2, 1);
+		End
+		If m_ssYear1[hData] = "" Or m_ssYear2[hData] = "" Then
+			nTemp = DateYear(nDateTime1, 1);
+			m_ssYear1[hData] = IntToStr(nTemp);
+			nTemp = DateYear(nDateTime2, 1);
+			m_ssYear2[hData] = IntToStr(nTemp);
+		End
+		If m_ssMonth1[hData] = "" Or m_ssMonth2[hData] = "" Then
+			nTemp = DateMonth(nDateTime1);
+			m_ssMonth1[hData] = AddZeroFront(nTemp);
+			nTemp = DateMonth(nDateTime2);
+			m_ssMonth2[hData] = AddZeroFront(nTemp);
+		End
+		If m_ssDay1[hData] = "" Or m_ssDay2[hData] = "" Then
+			nTemp = DateDay(nDateTime1);
+			m_ssDay1[hData] = AddZeroFront(nTemp);
+			nTemp = DateDay(nDateTime2);
+			m_ssDay2[hData] = AddZeroFront(nTemp);
+		End
+		If m_ssHour1[hData] = "" Or m_ssHour2[hData] = "" Then
+			nTemp = TimeHour(nDateTime1);
+			m_ssHour1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeHour(nDateTime2);
+			m_ssHour2[hData] = AddZeroFront(nTemp);
+		End
+		If m_ssMin1[hData] = "" Or m_ssMin1[hData] = "" Then
+			nTemp = TimeMin(nDateTime1);
+			m_ssMin1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeMin(nDateTime2);
+			m_ssMin2[hData] = AddZeroFront(nTemp);
+		End
+		If m_ssSec1[hData] = "" Or m_ssSec1[hData] = "" Then
+			nTemp = TimeSec(nDateTime1);
+			m_ssSec1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeSec(nDateTime2);
+			m_ssSec2[hData] = AddZeroFront(nTemp);
+		End
+    CASE 2	/* Disabled Alarm */
+		If m_sdfldDate1[hData] = "" Or m_sdfldDate2[hData] = "" Then
+			m_sdfldDate1[hData] = TimeToStr(nDateTime1, 9);
+			m_sdfldDate2[hData] = TimeToStr(nDateTime2, 9);
+		End
+		If m_sdfldTime1[hData] = "" Or m_sdfldTime2[hData] = "" Then
+			m_sdfldTime1[hData] = TimeToStr(nDateTime1, 1);
+			m_sdfldTime2[hData] = TimeToStr(nDateTime2, 1);
+		End
+		If m_sdYear1[hData] = "" Or m_sdYear2[hData] = "" Then
+			nTemp = DateYear(nDateTime1, 1);
+			m_sdYear1[hData] = IntToStr(nTemp);
+			nTemp = DateYear(nDateTime2, 1);
+			m_sdYear2[hData] = IntToStr(nTemp);
+		End
+		IF m_sdMonth1[hData] = "" OR m_sdMonth2[hData] = "" Then
+			nTemp = DateMonth(nDateTime1);
+			m_sdMonth1[hData] = AddZeroFront(nTemp);
+			nTemp = DateMonth(nDateTime2);
+			m_sdMonth2[hData] = AddZeroFront(nTemp);
+		End
+		IF m_sdDay1[hData] = "" OR m_sdDay2[hData] = "" Then
+			nTemp = DateDay(nDateTime1);
+			m_sdDay1[hData] = AddZeroFront(nTemp);
+			nTemp = DateDay(nDateTime2);
+			m_sdDay2[hData] = AddZeroFront(nTemp);
+		End
+		IF m_sdHour1[hData] = "" OR m_sdHour2[hData] = "" Then
+			nTemp = TimeHour(nDateTime1);
+			m_sdHour1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeHour(nDateTime2);
+			m_sdHour2[hData] = AddZeroFront(nTemp);
+		End
+		IF m_sdMin1[hData] = "" OR m_sdMin1[hData] = "" Then
+			nTemp = TimeMin(nDateTime1);
+			m_sdMin1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeMin(nDateTime2);
+			m_sdMin2[hData] = AddZeroFront(nTemp);
+		End
+		IF m_sdSec1[hData] = "" OR m_sdSec1[hData] = "" Then
+			nTemp = TimeSec(nDateTime1);
+			m_sdSec1[hData] = AddZeroFront(nTemp);
+			nTemp = TimeSec(nDateTime2);
+			m_sdSec2[hData] = AddZeroFront(nTemp);
+		End
+    END SELECT
+End
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              _DateStart, _DateEnd, _TimeStart and _TimeEnd are call-back functions
+//              Used by FormButtons [Date1] [Date2] [Time1] [Time2] in FilterFromx1
+//
+//*******************************************************************************************
+INT
+FUNCTION _DateStart()
+	INT hData = _FormDataGetHnd();
+
+	SELECT CASE m_nAlarmInfo[hData]
+	CASE 0  /*Active Alarm Page*/
+        m_safldDate1[hData] = FormNumPad("Starting Date", m_safldDate1[hData], 8);
+	CASE 1  /*Summary Alarm Page*/
+		m_ssfldDate1[hData] = FormNumPad("Starting Date", m_ssfldDate1[hData], 8);
+	CASE 2  /*Active Alarm Page*/
+		m_sdfldDate1[hData] = FormNumPad("Starting Date", m_sdfldDate1[hData], 8);
+	END SELECT
+	FormSetData(m_hForm[hData]);
+        FormGoto(m_hForm[hData]);
+	RETURN 0;
+
+END
+
+INT
+FUNCTION _DateEnd()
+	INT hData = _FormDataGetHnd();
+
+	SELECT CASE m_nAlarmInfo[hData]
+	CASE 0  /*Active Alarm Page*/
+        m_safldDate2[hData] = FormNumPad("Ending Date", m_safldDate2[hData], 8);
+	CASE 1  /*Summary Alarm Page*/
+		m_ssfldDate2[hData] = FormNumPad("Ending Date", m_ssfldDate2[hData], 8);
+	CASE 2  /*Active Alarm Page*/
+		m_sdfldDate2[hData] = FormNumPad("Ending Date", m_sdfldDate2[hData], 8);
+	END SELECT
+	FormSetData(m_hForm[hData]);
+        FormGoto(m_hForm[hData]);
+	RETURN 0;
+END
+
+INT
+FUNCTION _TimeStart()
+	INT hData = _FormDataGetHnd();
+
+	SELECT CASE m_nAlarmInfo[hData]
+	CASE 0  /*Active Alarm Page*/
+		m_safldTime1[hData] = FormNumPad("Starting Time", m_safldTime1[hData], 96);
+	CASE 1  /*Summary Alarm Page*/
+		m_ssfldTime1[hData] = FormNumPad("Starting Time", m_ssfldTime1[hData], 96);
+	CASE 2  /*Active Alarm Page*/
+		m_sdfldTime1[hData] = FormNumPad("Starting Time", m_sdfldTime1[hData], 96);
+	END SELECT
+	FormSetData(m_hForm[hData]);
+        FormGoto(m_hForm[hData]);
+	RETURN 0;
+END
+
+INT
+FUNCTION _TimeEnd()
+	INT hData = _FormDataGetHnd();
+
+	SELECT CASE m_nAlarmInfo[hData]
+	CASE 0  /*Active Alarm Page*/
+		m_safldTime2[hData] = FormNumPad("Ending Time", m_safldTime2[hData], 96);
+	CASE 1  /*Summary Alarm Page*/
+		m_ssfldTime2[hData] = FormNumPad("Ending Time", m_ssfldTime2[hData], 96);
+	CASE 2  /*Active Alarm Page*/
+		m_sdfldTime2[hData] = FormNumPad("Ending Time", m_sdfldTime2[hData], 96);
+	END SELECT
+	FormSetData(m_hForm[hData]);
+        FormGoto(m_hForm[hData]);
+	RETURN 0;
+END
+
+//********************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FindTimeString
+//
+//      ARGUMENTS:
+//              sShiftInfo, shift info string
+//              nFlag = 0, retrieving the starting time
+//              nFlag = 1, retrieving the finishing time
+//      NOTES:
+//              Retrieve time from shift string "time1 -> time2 Shift Name"
+//********************************************************************************************
+STRING
+FUNCTION FindTimeString(STRING sShiftInfo, INT nFlag)
+	INT nPos1;
+	INT nPos2;
+	STRING sTime;
+
+    nPos1 = StrSearch(0, sShiftInfo, "(");
+    nPos2 = StrSearch(0, sShiftInfo, ")");
+    IF nFlag = 1 THEN
+        sTime = StrMid(sShiftInfo, nPos1 + 1, (nPos2 - nPos1 - 1));
+	RETURN (sTime);
+    ELSE
+        nPos1 = StrSearch(nPos1 + 1, sShiftInfo, "(");
+        nPos2 = StrSearch(nPos2 + 1, sShiftInfo, ")");
+        sTime = StrMid(sShiftInfo, nPos1 + 1, (nPos2 - nPos1 - 1));
+	RETURN (sTime);
+    END
+END
+
+//********************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AlarmFilterForm
+//
+//      ARGUMENTS:
+//              nIndex, 0 for active; 1 for summary; 2 for disabled
+//              nMode , 0 for form having datetime as droplist and no shift interface; 
+//                      1 for form having datetime as droplist and shift interface; 
+//                      2 for form having datetime as field and no shift interface; 
+//                      3 for form having datetime as field and shift interface; 
+//              nDebug, 1 for debug, writing query argu list to file filter.txt in [run]:
+//              nAN   ,	The AN of the alarm list, default is -1 (all lists) if not specified
+//
+//      RETURNS:
+//              1 IF filter has been applied, 0 IF cleared OR -1 IF no change
+//
+//      NOTES:
+//********************************************************************************************
+
+INT
+FUNCTION
+AlarmFilterForm(INT nIndex, INT nMode = 0, INT nDebug = 0, INT nAN = -1)
+	INT hDev;
+	INT I = 0;
+	INT nShiftFlag;
+	INT retValue = -1;
+	INT	hData = _FormDataGetHnd();
+
+    nShiftFlag = nMode Mod 2;
+    IF m_nShiftInitFlag = 0 AND nShiftFlag = 1 THEN
+        m_nShiftInitFlag = 1;
+        hDev = DevOpen("ShiftConfigure", 0);
+        IF hDev = -1 THEN
+            Prompt("Cannot open ShiftConfigure device!");
+        ELSE
+            DevFirst(hDev); 
+            WHILE NOT DevEof(hDev) AND I < 4 DO 
+                m_sShiftCfg[I] = "(" + DevGetField(hDev, "ShiftStart") + ") -> (" ;
+                m_sShiftCfg[I] = m_sShiftCfg[I] + DevGetField(hDev, "ShiftFinish") + ") ";
+                m_sShiftCfg[I] = m_sShiftCfg[I] + DevGetField(hDev, "ShiftName");
+                DevNext(hDev);
+                I = I + 1;
+            END
+            m_nNumShifts = I;
+            DevClose(hDev);
+            m_sacboShiftInfo[hData] = m_sShiftCfg[0];
+            m_sscboShiftInfo[hData] = m_sShiftCfg[0];
+            m_sdcboShiftInfo[hData] = m_sShiftCfg[0];
+        END
+        m_sacboShiftInfo[hData] = m_sShiftCfg[0];
+    END
+    SELECT CASE nIndex
+	CASE 0  /* Active Alarm */
+	     SELECT CASE nMode
+		CASE 0
+		     retValue = FilterForm00(nShiftFlag, nDebug, nAN, hData); /*Date Droplist without Shift*/
+		CASE 1
+		     retValue = FilterForm00(nShiftFlag, nDebug, nAN, hData); /*Date Droplist with Shift*/
+		CASE 2
+		     retValue = retValue = FilterForm01(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad without Shift*/
+		CASE 3
+		     retValue = FilterForm01(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad with Shift*/
+		CASE ELSE
+		     Beep(0);
+		     MESSAGE("@(AlarmFilterForm Error)", "@(Valid Mode must be 0-3.)", 16);
+		END SELECT
+	CASE 1  /* Summary Alarm */
+	     SELECT CASE nMode
+		CASE 0
+		     retValue = FilterForm10(nShiftFlag, nDebug, nAN, hData); /*Date Droplist without Shift*/
+		CASE 1
+		     retValue = FilterForm10(nShiftFlag, nDebug, nAN, hData); /*Date Droplist with Shift*/
+		CASE 2
+		     retValue = FilterForm11(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad without Shift*/
+		CASE 3
+		     retValue = FilterForm11(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad with Shift*/
+		CASE ELSE
+		     Beep(0);
+		     MESSAGE("@(AlarmFilterForm Error)", "@(Valid Mode must be 0-3.)", 16);
+		END SELECT
+	CASE 2  /* Disabled Alarm */
+	     SELECT CASE nMode
+		CASE 0
+		     retValue = FilterForm20(nShiftFlag, nDebug, nAN, hData); /*Date Droplist without Shift*/
+		CASE 1
+		     retValue = FilterForm20(nShiftFlag, nDebug, nAN, hData); /*Date Droplist with Shift*/
+		CASE 2
+		     retValue = FilterForm21(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad without Shift*/
+		CASE 3
+		     retValue = FilterForm21(nShiftFlag, nDebug, nAN, hData); /*Date Fieldpad with Shift*/
+		CASE ELSE
+		     Beep(0);
+		     MESSAGE("@(AlarmFilterForm Error)", "@(Valid Mode must be 0-3.)", 16);
+		END SELECT
+	CASE ELSE
+		Beep(0);
+		MESSAGE("@(AlarmFilterForm Error)", "@(Valid values for the first^nargument must be 0-2.)", 16);
+    END SELECT
+
+    RETURN retValue;
+END
+
+INT
+FUNCTION _AlarmFilterHelp()
+	INT hData = _FormDataGetHnd();
+
+	STRING sPath;
+	sPath = ParameterGet("CtEdit","User","");
+	IF sPath <> "" THEN
+		sPath = sPath + "\Include\AlarmFilter.chm";
+		SELECT CASE m_nAlarmInfo[hData]
+		CASE 0
+			HtmlHelp(sPath,0,"/html/alar69iq.htm");
+		CASE 1
+			HtmlHelp(sPath,0,"/html/alar722a.htm");
+		CASE 2
+			HtmlHelp(sPath,0,"/html/alar2w4y.htm");
+		END SELECT
+		RETURN 0;
+	END
+	RETURN 1;
+END
+
+
+//********************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      DATE:   April 2010
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AlarmFilterFormIsApplied
+//
+//      ARGUMENTS:
+//              nIndex, 0 for active; 1 for summary; 2 for disabled
+//				hData, handle to the saved form data, default = -1 (auto detect)
+//
+//      RETURNS:
+//              1 if alarm filter is applied by the form, otherwise 0 is returned
+//
+//      NOTES:
+//********************************************************************************************
+INT
+FUNCTION
+AlarmFilterFormIsApplied(INT nIndex, INT hData = -1)
+	INT nIsApplied = 0;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+	SELECT CASE nIndex
+	CASE 0
+		IF (m_sachkArea[hData] = "1") OR (m_sachkCategory[hData] = "1") OR (m_sachkDate[hData] = "1") OR (m_sachkName[hData] = "1")
+			OR (m_sachkState[hData] = "1") OR (m_sachkTag[hData] = "1") OR (m_sachkType[hData] = "1") THEN
+			nIsApplied = 1;
+		END
+	CASE 1
+		IF (m_sschkArea[hData] = "1") OR (m_sschkCategory[hData] = "1") OR (m_sschkDate[hData] = "1") OR (m_sschkName[hData] = "1")
+			OR (m_sschkState[hData] = "1") OR (m_sschkTag[hData] = "1") OR (m_sschkType[hData] = "1") THEN
+			nIsApplied = 1;
+		END
+	CASE 2
+		IF (m_sdchkArea[hData] = "1") OR (m_sdchkCategory[hData] = "1") OR (m_sdchkDate[hData] = "1") OR (m_sdchkName[hData] = "1")
+			OR (m_sdchkState[hData] = "1") OR (m_sdchkTag[hData] = "1") OR (m_sdchkType[hData] = "1") THEN
+			nIsApplied = 1;
+		END
+	END SELECT
+
+    RETURN nIsApplied;
+END
+
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm00 for Active alarm page with Datetime droplist
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm00(INT nShiftFlag = 0, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING sYear1;
+    STRING sYear2;
+    STRING sMonth1;
+    STRING sMonth2;
+    STRING sDay1;
+    STRING sDay2;
+    STRING sHour1;
+    STRING sHour2;
+    STRING sMin1;
+    STRING sMin2;
+    STRING sSec1;
+    STRING sSec2;
+    STRING scboState;
+    STRING scboType;
+    STRING scboDTOpt;
+    STRING scboShiftInfo;
+
+    STRING sParams;
+    STRING sDate1;
+    STRING sDate2;
+    STRING sTime1;
+    STRING sTime2;
+    STRING sPrefix = "";
+    INT errRead;
+    INT hForm;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 0;
+    hForm = FormNew("@(Active Alarm Filter)", 60, 10, 25);
+    FormCheckBox(0, 0, "@(DateTime Range)", m_sachkDate[hData]);
+    FormPrompt(3, 2, "@(From):");
+    FormPrompt(3, 3, "@(To):");
+    FormComboBox(13, 2, 9, 4, sYear1, 0);
+    AddYearList();
+    FormComboBox(22, 2, 7, 4, sMonth1, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 2, 7, 4, sDay1, 0);
+    AddListItem(1, 31, 1);
+    FormComboBox(13, 3, 9, 4, sYear2, 0);
+    AddYearList();
+    FormComboBox(22, 3, 7, 4, sMonth2, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 3, 7, 4, sDay2, 0);
+    AddListItem(1, 31, 1);
+
+    IF nShiftFlag = 0 THEN
+        FormPrompt(13, 1, "@(Year          Month      Day             Hour      Minute    Second)");
+        FormComboBox(39, 2, 7, 4, sHour1, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 2, 7, 4, sMin1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 2, 7, 4, sSec1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(39, 3, 7, 4, sHour2, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 3, 7, 4, sMin2, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 3, 7, 4, sSec2, 0);
+        AddListItem(0, 55, 5);
+    ELSE
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts - 1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+
+    FormPrompt(13, 4, "@(Date/Time search options):");
+    FormComboBox(39, 4, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 5, "@(Name)", m_sachkName[hData]);
+    FormInput(11, 5, "", m_safldName[hData], 47);
+    FormCheckBox(0, 6, "@(Tag)", m_sachkTag[hData]);
+    FormInput(11, 6, "", m_safldTag[hData], 47);
+    FormCheckBox(0, 7, "@(Area)", m_sachkArea[hData]);
+    FormInput(11, 7, "", m_safldArea[hData], 16);
+    FormCheckBox(0, 8, "@(Category)", m_sachkCategory[hData]);
+    FormInput(11, 8, "", m_safldCategory[hData], 16);
+    FormCheckBox(31, 7, "@(State)", m_sachkState[hData]);
+    FormCheckBox(31, 8, "@(Type)", m_sachkType[hData]);
+
+    FormComboBox(41 ,7, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,8, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(0, hData);
+    sYear1 = m_saYear1[hData];
+    sYear2 = m_saYear2[hData];
+    sMonth1 = m_saMonth1[hData];
+    sMonth2 = m_saMonth2[hData];
+    sDay1 = m_saDay1[hData];
+    sDay2 = m_saDay2[hData];
+    sHour1 = m_saHour1[hData];
+    sHour2 = m_saHour2[hData];
+    sMin1 = m_saMin1[hData];
+    sMin2 = m_saMin2[hData];
+    sSec1 = m_saSec1[hData];
+    sSec2 = m_saSec2[hData];
+    scboState = m_sacboState[hData];
+    scboType = m_sacboType[hData];
+    scboDTOpt = m_sacboDTOpt[hData];
+    scboShiftInfo = m_sacboShiftInfo[hData];
+    FormButton(27, 9, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 9, "   @(OK)   ", 0, 1);
+    FormButton(41, 9, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 Then
+        /* Create valid date and time strings */
+        sDate1 = GetDateString(sYear1, sMonth1, sDay1);
+        sDate2 = GetDateString(sYear2, sMonth2, sDay2);
+        sTime1 = GetTimeString(sHour1, sMin1, sSec1);
+        sTime2 = GetTimeString(sHour2, sMin2, sSec2);
+
+        /*Do Date/Time conversion before passing to AlarmQuery and AlarmSetQuery */
+        nDate1 = StrToDate(sDate1);
+        nDate2 = StrToDate(sDate2);
+
+        /* Save the user entries (Combobox only) */
+        IF nDate1 > 0 THEN
+            m_saYear1[hData] = sYear1;
+            m_saMonth1[hData] = sMonth1;
+            m_saDay1[hData] = sDay1;       
+        END
+        IF nDate2 > 0 THEN
+            m_saYear2[hData] = sYear2;
+            m_saMonth2[hData] = sMonth2;
+            m_saDay2[hData] = sDay2;
+        END
+        m_saHour1[hData] = sHour1;
+        m_saHour2[hData] = sHour2;
+        m_saMin1[hData] = sMin1;
+        m_saMin2[hData] = sMin2;
+        m_saSec1[hData] = sSec1;
+        m_saSec2[hData] = sSec2;
+        m_sacboState[hData] = scboState;
+        m_sacboType[hData] = scboType;
+        m_sacboDTOpt[hData] = scboDTOpt;
+        m_sacboShiftInfo[hData] = scboShiftInfo;
+
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(sTime1);
+            nTime2 = StrToTime(sTime2);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        
+        sParams = m_sachkArea[hData] + "," + m_safldArea[hData] + "," + m_sachkCategory[hData] + "," + m_safldCategory[hData] + ",";
+        sParams = sParams + m_sachkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sachkName[hData] + ",^"";
+        sParams = sParams + m_safldName[hData] + "^"," + m_sachkState[hData] + ",^"" + scboState + "^",";
+        sParams = sParams + m_sachkTag[hData] + "," + m_safldTag[hData] + "," + m_sachkType[hData] + "," + scboType  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(scboDTOpt,1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(0, m_sachkArea[hData], m_safldArea[hData], m_sachkCategory[hData],m_safldCategory[hData],m_sachkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sachkName[hData],m_safldName[hData],m_sachkState[hData], scboState, m_sachkTag[hData],m_safldTag[hData],m_sachkType[hData],scboType,scboDTOpt);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+                RETURN AlarmFilterFormIsApplied(0, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+END
+
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm10 for Summary alarm page with Datetime droplist
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm10(INT nShiftFlag = 0, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING sYear1;
+    STRING sYear2;
+    STRING sMonth1;
+    STRING sMonth2;
+    STRING sDay1;
+    STRING sDay2;
+    STRING sHour1;
+    STRING sHour2;
+    STRING sMin1;
+    STRING sMin2;
+    STRING sSec1;
+    STRING sSec2;
+    STRING scboState;
+    STRING scboType;
+    STRING scboDTOpt;
+    STRING scboShiftInfo;
+
+    STRING sParams;
+    STRING sDate1;
+    STRING sDate2;
+    STRING sTime1;
+    STRING sTime2;
+    STRING sPrefix = "";
+    INT errRead;
+    INT hForm;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 1;
+    hForm = FormNew("@(Summary Alarm Filter)", 60, 10, 25);
+    FormCheckBox(0, 0, "@(Range):", m_sschkDate[hData]);
+    FormRadioButton(16 ,0,"@(OnDateTime)",  m_ssOnDateOpt[hData]);
+    FormRadioButton(31, 0,"@(OffDateTime)", m_ssOffDateOpt[hData]);
+    FormRadioButton(46 ,0,"@(AckDateTime)", m_ssAckDateOpt[hData]);
+
+    FormPrompt(3, 2, "@(From):");
+    FormPrompt(3, 3, "@(To):");
+    FormComboBox(13, 2, 9, 4, sYear1, 0);
+    AddYearList();
+    FormComboBox(22, 2, 7, 4, sMonth1, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 2, 7, 4, sDay1, 0);
+    AddListItem(1, 31, 1);
+    FormComboBox(13, 3, 9, 4, sYear2, 0);
+    AddYearList();
+    FormComboBox(22, 3, 7, 4, sMonth2, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 3, 7, 4, sDay2, 0);
+    AddListItem(1, 31, 1);
+
+    IF nShiftFlag = 0 THEN
+        FormPrompt(13, 1, "@(Year          Month      Day             Hour      Minute    Second)");
+        FormComboBox(39, 2, 7, 4, sHour1, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 2, 7, 4, sMin1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 2, 7, 4, sSec1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(39, 3, 7, 4, sHour2, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 3, 7, 4, sMin2, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 3, 7, 4, sSec2, 0);
+        AddListItem(0, 55, 5);
+    ELSE
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts - 1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+
+    FormPrompt(13, 4, "@(Date/Time search options):");
+    FormComboBox(39, 4, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 5, "@(Name)", m_sschkName[hData]);
+    FormInput(11, 5, "", m_ssfldName[hData], 47);
+    FormCheckBox(0, 6, "@(Tag)", m_sschkTag[hData]);
+    FormInput(11, 6, "", m_ssfldTag[hData], 47);
+    FormCheckBox(0, 7, "@(Area)", m_sschkArea[hData]);
+    FormInput(11, 7, "", m_ssfldArea[hData], 16);
+    FormCheckBox(0, 8, "@(Category)", m_sschkCategory[hData]);
+    FormInput(11, 8, "", m_ssfldCategory[hData], 16);
+    FormCheckBox(31, 7, "@(State)", m_sschkState[hData]);
+    FormCheckBox(31, 8, "@(Type)", m_sschkType[hData]);
+
+    FormComboBox(41 ,7, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,8, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(1, hData);
+    sYear1 = m_ssYear1[hData];
+    sYear2 = m_ssYear2[hData];
+    sMonth1 = m_ssMonth1[hData];
+    sMonth2 = m_ssMonth2[hData];
+    sDay1 = m_ssDay1[hData];
+    sDay2 = m_ssDay2[hData];
+    sHour1 = m_ssHour1[hData];
+    sHour2 = m_ssHour2[hData];
+    sMin1 = m_ssMin1[hData];
+    sMin2 = m_ssMin2[hData];
+    sSec1 = m_ssSec1[hData];
+    sSec2 = m_ssSec2[hData];
+    scboState = m_sscboState[hData];
+    scboType = m_sscboType[hData];
+    scboDTOpt = m_sscboDTOpt[hData];
+    scboShiftInfo = m_sacboShiftInfo[hData];
+    FormButton(27, 9, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 9, "   @(OK)   ", 0, 1);
+    FormButton(41, 9, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 THEN
+        /* Create valid date and time strings */
+        sDate1 = GetDateString(sYear1, sMonth1, sDay1);
+        sDate2 = GetDateString(sYear2, sMonth2, sDay2);
+        sTime1 = GetTimeString(sHour1, sMin1, sSec1);
+        sTime2 = GetTimeString(sHour2, sMin2, sSec2);
+
+        /*Do Date/Time conversion before passing to AlarmQuery and AlarmSetQuery */
+        nDate1 = StrToDate(sDate1);
+        nDate2 = StrToDate(sDate2);
+
+        /* Save the user entries (Combobox only) */
+        IF nDate1 > 0 THEN
+            m_ssYear1[hData] = sYear1;
+            m_ssMonth1[hData] = sMonth1;
+            m_ssDay1[hData] = sDay1;       
+        END
+        IF nDate2 > 0 THEN
+            m_ssYear2[hData] = sYear2;
+            m_ssMonth2[hData] = sMonth2;
+            m_ssDay2[hData] = sDay2;
+        END
+        m_ssHour1[hData] = sHour1;
+        m_ssHour2[hData] = sHour2;
+        m_ssMin1[hData] = sMin1;
+        m_ssMin2[hData] = sMin2;
+        m_ssSec1[hData] = sSec1;
+        m_ssSec2[hData] = sSec2;
+        m_sscboState[hData] = scboState;
+        m_sscboType[hData] = scboType;
+        m_sscboDTOpt[hData] = scboDTOpt;
+        m_sacboShiftInfo[hData] = scboShiftInfo;
+    
+        /* Summary alarm only: sPrefix value determines which date/time field to be used*/
+        IF m_ssOnDateOpt[hData] = "1" THEN sPrefix = "On"  END;  /* for OnDateTime */
+        IF m_ssOffDateOpt[hData]= "1" THEN sPrefix = "Off" END;  /* for OffDateTime */
+        IF m_ssAckDateOpt[hData]= "1" THEN sPrefix = "Ack" END;  /* for AckDateTime */
+
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(sTime1);
+            nTime2 = StrToTime(sTime2);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        
+        sParams = m_sschkArea[hData] + "," + m_ssfldArea[hData] + "," + m_sschkCategory[hData] + "," + m_ssfldCategory[hData] + ",";
+        sParams = sParams + m_sschkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sschkName[hData] + ",^"";
+        sParams = sParams + m_ssfldName[hData] + "^"," + m_sschkState[hData] + ",^"" + scboState + "^",";
+        sParams = sParams + m_sschkTag[hData] + "," + m_ssfldTag[hData] + "," + m_sschkType[hData] + "," + scboType  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(scboDTOpt,1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(1, m_sschkArea[hData], m_ssfldArea[hData], m_sschkCategory[hData],m_ssfldCategory[hData],m_sschkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sschkName[hData],m_ssfldName[hData],m_sschkState[hData], scboState, m_sschkTag[hData],m_ssfldTag[hData],m_sschkType[hData],scboType,scboDTOpt);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+                RETURN AlarmFilterFormIsApplied(1, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+End
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm20 for Disabled alarm page with Datetime droplist
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm20(INT nShiftFlag = 0, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING sYear1;
+    STRING sYear2;
+    STRING sMonth1;
+    STRING sMonth2;
+    STRING sDay1;
+    STRING sDay2;
+    STRING sHour1;
+    STRING sHour2;
+    STRING sMin1;
+    STRING sMin2;
+    STRING sSec1;
+    STRING sSec2;
+    STRING scboState;
+    STRING scboType;
+    STRING scboDTOpt;
+    STRING scboShiftInfo;
+
+    STRING sParams;
+    STRING sDate1;
+    STRING sDate2;
+    STRING sTime1;
+    STRING sTime2;
+    STRING sPrefix = "";
+    INT errRead;
+    INT hForm;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 2;
+    hForm = FormNew("@(Disabled Alarm Filter)", 60, 10, 25);
+    FormCheckBox(0, 0, "@(DateTime Range)", m_sdchkDate[hData]);
+
+    FormPrompt(3, 2, "@(From):");
+    FormPrompt(3, 3, "@(To):");
+    FormComboBox(13, 2, 9, 4, sYear1, 0);
+    AddYearList();
+    FormComboBox(22, 2, 7, 4, sMonth1, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 2, 7, 4, sDay1, 0);
+    AddListItem(1, 31, 1);
+    FormComboBox(13, 3, 9, 4, sYear2, 0);
+    AddYearList();
+    FormComboBox(22, 3, 7, 4, sMonth2, 0);
+    AddListItem(1, 12, 1);
+    FormComboBox(29, 3, 7, 4, sDay2, 0);
+    AddListItem(1, 31, 1);
+
+    IF nShiftFlag = 0 THEN
+        FormPrompt(13, 1, "@(Year          Month      Day             Hour      Minute    Second)");
+        FormComboBox(39, 2, 7, 4, sHour1, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 2, 7, 4, sMin1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 2, 7, 4, sSec1, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(39, 3, 7, 4, sHour2, 0);
+        AddListItem(0, 23, 1);
+        FormComboBox(46, 3, 7, 4, sMin2, 0);
+        AddListItem(0, 55, 5);
+        FormComboBox(53, 3, 7, 4, sSec2, 0);
+        AddListItem(0, 55, 5);
+    ELSE
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts - 1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+
+    FormPrompt(13, 4, "@(Date/Time search options):");
+    FormComboBox(39, 4, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 5, "@(Name)", m_sdchkName[hData]);
+    FormInput(11, 5, "", m_sdfldName[hData], 47);
+    FormCheckBox(0, 6, "@(Tag)", m_sdchkTag[hData]);
+    FormInput(11, 6, "", m_sdfldTag[hData], 47);
+    FormCheckBox(0, 7, "@(Area)", m_sdchkArea[hData]);
+    FormInput(11, 7, "", m_sdfldArea[hData], 16);
+    FormCheckBox(0, 8, "@(Category)", m_sdchkCategory[hData]);
+    FormInput(11, 8, "", m_sdfldCategory[hData], 16);
+    FormCheckBox(31, 7, "@(State)", m_sdchkState[hData]);
+    FormCheckBox(31, 8, "@(Type)", m_sdchkType[hData]);
+
+    FormComboBox(41 ,7, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,8, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(2, hData);
+    sYear1 = m_sdYear1[hData];
+    sYear2 = m_sdYear2[hData];
+    sMonth1 = m_sdMonth1[hData];
+    sMonth2 = m_sdMonth2[hData];
+    sDay1 = m_sdDay1[hData];
+    sDay2 = m_sdDay2[hData];
+    sHour1 = m_sdHour1[hData];
+    sHour2 = m_sdHour2[hData];
+    sMin1 = m_sdMin1[hData];
+    sMin2 = m_sdMin2[hData];
+    sSec1 = m_sdSec1[hData];
+    sSec2 = m_sdSec2[hData];
+    scboState = m_sdcboState[hData];
+    scboType = m_sdcboType[hData];
+    scboDTOpt = m_sdcboDTOpt[hData];
+    scboShiftInfo = m_sacboShiftInfo[hData];
+    FormButton(27, 9, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 9, "   @(OK)   ", 0, 1);
+    FormButton(41, 9, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 THEN
+        /* Create valid date and time strings */
+        sDate1 = GetDateString(sYear1, sMonth1, sDay1);
+        sDate2 = GetDateString(sYear2, sMonth2, sDay2);
+        sTime1 = GetTimeString(sHour1, sMin1, sSec1);
+        sTime2 = GetTimeString(sHour2, sMin2, sSec2);
+
+        /*Do Date/Time conversion before passing to AlarmQuery and AlarmSetQuery */
+        nDate1 = StrToDate(sDate1);
+        nDate2 = StrToDate(sDate2);
+
+        /* Save the user entries (Combobox only) */
+        IF nDate1 > 0 THEN
+            m_sdYear1[hData] = sYear1;
+            m_sdMonth1[hData] = sMonth1;
+            m_sdDay1[hData] = sDay1;       
+        END
+        IF nDate2 > 0 THEN
+            m_sdYear2[hData] = sYear2;
+            m_sdMonth2[hData] = sMonth2;
+            m_sdDay2[hData] = sDay2;
+        END
+        m_sdHour1[hData] = sHour1;
+        m_sdHour2[hData] = sHour2;
+        m_sdMin1[hData] = sMin1;
+        m_sdMin2[hData] = sMin2;
+        m_sdSec1[hData] = sSec1;
+        m_sdSec2[hData] = sSec2;
+        m_sdcboState[hData] = scboState;
+        m_sdcboType[hData] = scboType;
+        m_sdcboDTOpt[hData] = scboDTOpt;
+        m_sacboShiftInfo[hData] = scboShiftInfo;
+    
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(sTime1);
+            nTime2 = StrToTime(sTime2);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        
+        sParams = m_sdchkArea[hData] + "," + m_sdfldArea[hData] + "," + m_sdchkCategory[hData] + "," + m_sdfldCategory[hData] + ",";
+        sParams = sParams + m_sdchkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sdchkName[hData] + ",^"";
+        sParams = sParams + m_sdfldName[hData] + "^"," + m_sdchkState[hData] + ",^"" + scboState + "^",";
+        sParams = sParams + m_sdchkTag[hData] + "," + m_sdfldTag[hData] + "," + m_sdchkType[hData] + "," + scboType  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(scboDTOpt,1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(2, m_sdchkArea[hData], m_sdfldArea[hData], m_sdchkCategory[hData],m_sdfldCategory[hData],m_sdchkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sdchkName[hData],m_sdfldName[hData],m_sdchkState[hData], scboState, m_sdchkTag[hData],m_sdfldTag[hData],m_sdchkType[hData],scboType,scboDTOpt);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+            	RETURN AlarmFilterFormIsApplied(2, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+END
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm01 for Active alarm page with Datetime field
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm01(INT nShiftFlag, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING scboShiftInfo;
+    STRING scboDTOpt;
+    STRING scboState;
+    STRING scboType;
+    STRING sParams;
+    STRING sPrefix = "";
+    INT errRead;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 0;  /*Active Alarm Page*/
+    m_hForm[hData] = FormNew("@(Active Alarm Filter)", 60, 9, 25);
+    FormCheckBox(0, 0, "@(DateTime Range)", m_sachkDate[hData]);
+    IF nShiftFlag = 0 THEN
+        FormPrompt(3, 1, "@(From):");
+        FormButton(27, 1, "@(Date)1", _DateStart, 0)
+        FormInput(11, 1, "", m_safldDate1[hData], 14);
+        FormPrompt(3, 2, "@(To):");
+        FormInput(37, 1, "", m_safldTime1[hData], 14);
+        FormInput(11, 2, "", m_safldDate2[hData], 14);
+        FormInput(37, 2, "", m_safldTime2[hData], 14);
+        FormButton(54, 1, "@(Time)1", _TimeStart, 0)
+        FormButton(27, 2, "@(Date)2", _DateEnd, 0)
+        FormButton(54, 2, "@(Time)2", _TimeEnd, 0)
+    ELSE
+        FormPrompt(3, 2, "@(From):");
+        FormButton(27, 2, "@(Date)1", _DateStart, 0)
+        FormInput(11, 2, "", m_safldDate1[hData], 14);
+        FormPrompt(34, 2, "@(To)");
+        FormInput(37, 2, "", m_safldDate2[hData], 15);
+        FormButton(54, 2, "@(Date)2", _DateEnd, 0)
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts -1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+    
+    FormPrompt(13, 3, "@(Date/Time search options):");
+    FormComboBox(39 ,3, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 4, "@(Name)", m_sachkName[hData]);
+    FormInput(11, 4, "", m_safldName[hData], 47);
+    FormCheckBox(0, 5, "@(Tag)", m_sachkTag[hData]);
+    FormInput(11, 5, "", m_safldTag[hData], 47);
+    FormCheckBox(0, 6, "@(Area)", m_sachkArea[hData]);
+    FormInput(11, 6, "", m_safldArea[hData], 16);
+    FormCheckBox(0, 7, "@(Category)", m_sachkCategory[hData]);
+    FormInput(11, 7, "", m_safldCategory[hData], 16);
+    FormCheckBox(31, 6, "@(State)", m_sachkState[hData]);
+    FormCheckBox(31, 7, "@(Type)", m_sachkType[hData]);
+
+    FormComboBox(41 ,6, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,7, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(0, hData);
+    scboDTOpt = m_sacboDTOpt[hData];
+    scboState = m_sacboState[hData];
+    scboType = m_sacboType[hData];
+    scboShiftInfo = m_sacboShiftInfo[hData];
+    FormButton(27, 8, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 8, "   @(OK)   ", 0, 1);
+    FormButton(41, 8, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 Then
+        m_sacboDTOpt[hData] = scboDTOpt;
+        m_sacboState[hData] = scboState;
+        m_sacboType[hData] = scboType;
+        m_sacboShiftInfo[hData] = scboShiftInfo;
+        /*Do Date/Time conversion before passing to AlarmQuery2 and AlarmSetQuery */
+        nDate1 = StrToDate(m_safldDate1[hData]);
+        nDate2 = StrToDate(m_safldDate2[hData]);
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(m_safldTime1[hData]);
+            nTime2 = StrToTime(m_safldTime2[hData]);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        sParams = m_sachkArea[hData] + "," + m_safldArea[hData] + "," + m_sachkCategory[hData] + "," + m_safldCategory[hData] + ",";
+        sParams = sParams + m_sachkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sachkName[hData] + ",^"";
+        sParams = sParams + m_safldName[hData] + "^"," + m_sachkState[hData] + ",^"" + m_sacboState[hData] + "^",";
+        sParams = sParams + m_sachkTag[hData] + "," + m_safldTag[hData] + "," + m_sachkType[hData] + "," + m_sacboType[hData]  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(m_sacboDTOpt[hData],1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(0, m_sachkArea[hData], m_safldArea[hData], m_sachkCategory[hData],m_safldCategory[hData],m_sachkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sachkName[hData],m_safldName[hData],m_sachkState[hData], m_sacboState[hData], m_sachkTag[hData],m_safldTag[hData],m_sachkType[hData],m_sacboType[hData],m_sacboDTOpt[hData]);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+                RETURN AlarmFilterFormIsApplied(0, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+End
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm11 for Summary alarm page with Datetime field
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm11(INT nShiftFlag = 0, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING scboShiftInfo;
+    STRING scboDTOpt;
+    STRING scboState;
+    STRING scboType;
+    STRING sParams;
+    STRING sPrefix = "";
+    INT errRead;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 1;  /*Summary Alarm Page*/
+    m_hForm[hData] = FormNew("@(Summary Alarm Filter)", 60, 9, 25);
+    FormCheckBox(0, 0, "@(Range):", m_sschkDate[hData]);
+    FormRadioButton(16 ,0,"@(OnDateTime)",  m_ssOnDateOpt[hData]);
+    FormRadioButton(31, 0,"@(OffDateTime)", m_ssOffDateOpt[hData]);
+    FormRadioButton(46 ,0,"@(AckDateTime)", m_ssAckDateOpt[hData]);
+    IF nShiftFlag = 0 THEN
+        FormPrompt(3, 1, "@(From):");
+        FormButton(27, 1, "@(Date)1", _DateStart, 0)
+        FormInput(11, 1, "", m_ssfldDate1[hData], 14);
+        FormPrompt(3, 2, "@(To):");
+        FormInput(37, 1, "", m_ssfldTime1[hData], 14);
+        FormInput(11, 2, "", m_ssfldDate2[hData], 14);
+        FormInput(37, 2, "", m_ssfldTime2[hData], 14);
+        FormButton(54, 1, "@(Time)1", _TimeStart, 0)
+        FormButton(27, 2, "@(Date)2", _DateEnd, 0)
+        FormButton(54, 2, "@(Time)2", _TimeEnd, 0)
+    ELSE
+        FormPrompt(3, 2, "@(From):");
+        FormButton(27, 2, "@(Date)1", _DateStart, 0)
+        FormInput(11, 2, "", m_ssfldDate1[hData], 14);
+        FormPrompt(34, 2, "@(To)");
+        FormInput(37, 2, "", m_ssfldDate2[hData], 15);
+        FormButton(54, 2, "@(Date)2", _DateEnd, 0)
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts - 1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+    
+    FormPrompt(13, 3, "@(Date/Time search options):");
+    FormComboBox(39 ,3, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 4, "@(Name)", m_sschkName[hData]);
+    FormInput(11, 4, "", m_ssfldName[hData], 47);
+    FormCheckBox(0, 5, "@(Tag)", m_sschkTag[hData]);
+    FormInput(11, 5, "", m_ssfldTag[hData], 47);
+    FormCheckBox(0, 6, "@(Area)", m_sschkArea[hData]);
+    FormInput(11, 6, "", m_ssfldArea[hData], 16);
+    FormCheckBox(0, 7, "@(Category)", m_sschkCategory[hData]);
+    FormInput(11, 7, "", m_ssfldCategory[hData], 16);
+    FormCheckBox(31, 6, "@(State)", m_sschkState[hData]);
+    FormCheckBox(31, 7, "@(Type)", m_sschkType[hData]);
+
+    FormComboBox(41 ,6, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,7, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(1, hData);
+    scboDTOpt = m_sscboDTOpt[hData];
+    scboState = m_sscboState[hData];
+    scboType = m_sscboType[hData];
+    scboShiftInfo = m_sscboShiftInfo[hData];
+    FormButton(27, 8, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 8, "   @(OK)   ", 0, 1);
+    FormButton(41, 8, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 Then
+        m_sscboDTOpt[hData] = scboDTOpt;
+        m_sscboState[hData] = scboState;
+        m_sscboType[hData] = scboType;
+        m_sscboShiftInfo[hData] = scboShiftInfo;
+
+        /* Summary alarm only: sPrefix value determines which date/time field to be used*/
+        IF m_ssOnDateOpt[hData] = "1" THEN sPrefix = "On"  END;  /* for OnDateTime */
+        IF m_ssOffDateOpt[hData]= "1" THEN sPrefix = "Off" END;  /* for OffDateTime */
+        IF m_ssAckDateOpt[hData]= "1" THEN sPrefix = "Ack" END;  /* for AckDateTime */
+
+        /*Do Date/Time conversion before passing to AlarmQuery2 and AlarmSetQuery */
+        nDate1 = StrToDate(m_ssfldDate1[hData]);
+        nDate2 = StrToDate(m_ssfldDate2[hData]);
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(m_ssfldTime1[hData]);
+            nTime2 = StrToTime(m_ssfldTime2[hData]);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        sParams = m_sschkArea[hData] + "," + m_ssfldArea[hData] + "," + m_sschkCategory[hData] + "," + m_ssfldCategory[hData] + ",";
+        sParams = sParams + m_sschkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sschkName[hData] + ",^"";
+        sParams = sParams + m_ssfldName[hData] + "^"," + m_sschkState[hData] + ",^"" + m_sscboState[hData] + "^",";
+        sParams = sParams + m_sschkTag[hData] + "," + m_ssfldTag[hData] + "," + m_sschkType[hData] + "," + m_sscboType[hData]  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(m_sscboDTOpt[hData],1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(1, m_sschkArea[hData], m_ssfldArea[hData], m_sschkCategory[hData],m_ssfldCategory[hData],m_sschkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sschkName[hData],m_ssfldName[hData],m_sschkState[hData], m_sscboState[hData], m_sschkTag[hData],m_ssfldTag[hData],m_sschkType[hData],m_sscboType[hData],m_sscboDTOpt[hData]);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+                RETURN AlarmFilterFormIsApplied(1, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+End
+
+//******************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              FilterForm21 for Disabled alarm page with Datetime field
+//
+//      ARGUMENTS:
+//              nShiftFlag = 0 for no shift interfcae;1 for shift interfcae
+//              nDebug = 0 for no debug(default);1 for debug (write params to
+//              file - filter.txt);
+//              nAN = AN of alarm list, default is -1 (all lists) if not specified
+//              hData = handle to saved form data, default is -1 (auto detect)
+//
+//      RETURNS:
+//              1 if filter has been applied, 0 if cleared or -1 if no change
+//********************************************************************************
+INT
+FUNCTION
+FilterForm21(INT nShiftFlag = 0, INT nDebug = 0, INT nAN = -1, INT hData = -1)
+
+    STRING scboShiftInfo;
+    STRING scboDTOpt;
+    STRING scboState;
+    STRING scboType;
+    STRING sParams;
+    STRING sPrefix = "";
+    INT errRead;
+    INT errOption;
+    INT nDate1;
+    INT nDate2;
+    INT nTime1;
+    INT nTime2;
+    INT I;
+
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+    m_nAlarmInfo[hData] = 2;  /*Disabled Alarm Page*/
+    m_hForm[hData] = FormNew("@(Disabled Alarm Filter)", 60, 9, 25);
+    FormCheckBox(0, 0, "@(DateTime Range)", m_sdchkDate[hData]);
+    IF nShiftFlag = 0 THEN
+        FormPrompt(3, 1, "@(From):");
+        FormButton(27, 1, "@(Date)1", _DateStart, 0)
+        FormInput(11, 1, "", m_sdfldDate1[hData], 14);
+        FormPrompt(3, 2, "@(To):");
+        FormInput(37, 1, "", m_sdfldTime1[hData], 14);
+        FormInput(11, 2, "", m_sdfldDate2[hData], 14);
+        FormInput(37, 2, "", m_sdfldTime2[hData], 14);
+        FormButton(54, 1, "@(Time)1", _TimeStart, 0)
+        FormButton(27, 2, "@(Date)2", _DateEnd, 0)
+        FormButton(54, 2, "@(Time)2", _TimeEnd, 0)
+    ELSE
+        FormPrompt(3, 2, "@(From):");
+        FormButton(27, 2, "@(Date)1", _DateStart, 0)
+        FormInput(11, 2, "", m_sdfldDate1[hData], 14);
+        FormPrompt(34, 2, "@(To)");
+        FormInput(37, 2, "", m_sdfldDate2[hData], 15);
+        FormButton(54, 2, "@(Date)2", _DateEnd, 0)
+        FormPrompt(3, 1, "@(Shift):");
+        FormComboBox(13 ,1, 47, 5, scboShiftInfo, 0);
+	FOR I = 0 TO m_nNumShifts -1 DO
+            FormAddList(m_sShiftCfg[I]);
+        END
+    END
+    
+    FormPrompt(13, 3, "@(Date/Time search options):");
+    FormComboBox(39 ,3, 21, 5, scboDTOpt, 0);
+    FormAddList("1 - Datetime");
+    FormAddList("2 - Date Only");
+    FormAddList("3 - Time Only");
+    FormAddList("4 - Date then Time");
+    
+    FormCheckBox(0, 4, "@(Name)", m_sdchkName[hData]);
+    FormInput(11, 4, "", m_sdfldName[hData], 47);
+    FormCheckBox(0, 5, "@(Tag)", m_sdchkTag[hData]);
+    FormInput(11, 5, "", m_sdfldTag[hData], 47);
+    FormCheckBox(0, 6, "@(Area)", m_sdchkArea[hData]);
+    FormInput(11, 6, "", m_sdfldArea[hData], 16);
+    FormCheckBox(0, 7, "@(Category)", m_sdchkCategory[hData]);
+    FormInput(11, 7, "", m_sdfldCategory[hData], 16);
+    FormCheckBox(31, 6, "@(State)", m_sdchkState[hData]);
+    FormCheckBox(31, 7, "@(Type)", m_sdchkType[hData]);
+
+    FormComboBox(41 ,6, 19, 5, scboState, 0);
+    FormAddList("ON");
+    FormAddList("OFF");
+    FormAddList("HIGH HIGH");
+    FormAddList("HIGH");
+    FormAddList("LOW LOW");
+    FormAddList("LOW");
+    FormAddList("RATE OF CHANGE");
+    FormAddList("DEVIATION");
+
+    FormComboBox(41 ,7, 19, 5, scboType, 0);
+    FormAddList("Acknowledged");
+    FormAddList("Unacknowledged");
+    FormAddList("Disabled");
+
+    /* Initialize the default values */
+    InitDateTime(2, hData);
+    scboDTOpt = m_sdcboDTOpt[hData];
+    scboState = m_sdcboState[hData];
+    scboType = m_sdcboType[hData];
+    scboShiftInfo = m_sdcboShiftInfo[hData];
+    FormButton(27, 8, "  @(Help)  ", _AlarmFilterHelp, 0);
+    FormButton(13, 8, "   @(OK)   ", 0, 1);
+    FormButton(41, 8, " @(Cancel) ", 0, 2);
+
+    errRead = FormRead(0);
+
+    If errRead = 0 Then
+        m_sdcboDTOpt[hData] = scboDTOpt;
+        m_sdcboState[hData] = scboState;
+        m_sdcboType[hData] = scboType;
+        m_sdcboShiftInfo[hData] = scboShiftInfo;
+
+        /*Do Date/Time conversion before passing to AlarmQuery2 and AlarmSetQuery */
+        nDate1 = StrToDate(m_sdfldDate1[hData]);
+        nDate2 = StrToDate(m_sdfldDate2[hData]);
+	IF nShiftFlag = 0 THEN
+            nTime1 = StrToTime(m_sdfldTime1[hData]);
+            nTime2 = StrToTime(m_sdfldTime2[hData]);
+	ELSE
+            nTime1 = StrToTime(FindTimeString(scboShiftInfo, 1));
+            nTime2 = StrToTime(FindTimeString(scboShiftInfo, 2));                        
+	END                  
+        sParams = m_sdchkArea[hData] + "," + m_sdfldArea[hData] + "," + m_sdchkCategory[hData] + "," + m_sdfldCategory[hData] + ",";
+        sParams = sParams + m_sdchkDate[hData] + "," + IntToStr(nDate1) + "," + IntToStr(nDate2) + ",";
+        sParams = sParams + IntToStr(nTime1) + "," + IntToStr(nTime2) + "," + m_sdchkName[hData] + ",^"";
+        sParams = sParams + m_sdfldName[hData] + "^"," + m_sdchkState[hData] + ",^"" + m_sdcboState[hData] + "^",";
+        sParams = sParams + m_sdchkTag[hData] + "," + m_sdfldTag[hData] + "," + m_sdchkType[hData] + "," + m_sdcboType[hData]  + ",";
+        sParams = sParams + sPrefix + "," + StrLeft(m_sdcboDTOpt[hData],1);
+
+        /* This file is for debug of passing parameters only */
+        If nDebug = 1 Then
+            WriteParamToFile(sParams);
+        End
+        errOption = EvaluteOptions(2, m_sdchkArea[hData], m_sdfldArea[hData], m_sdchkCategory[hData],m_sdfldCategory[hData],m_sdchkDate[hData],nDate1,nDate2,nTime1,nTime2
+        	,m_sdchkName[hData],m_sdfldName[hData],m_sdchkState[hData], m_sdcboState[hData], m_sdchkTag[hData],m_sdfldTag[hData],m_sdchkType[hData],m_sdcboType[hData],m_sdcboDTOpt[hData]);
+        If errOption = 0 Then
+            IF AlarmSetQuery(nAN, "AlarmQuery", sParams) = 0 THEN
+                RETURN AlarmFilterFormIsApplied(2, hData);
+            END
+        End
+    End
+
+    RETURN -1;
+End
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              WriteParamToFile
+//
+//      NOTES:
+//              Write parameter list of user defined query function to file Filter.txt
+//            
+//*******************************************************************************************
+FUNCTION WriteParamToFile(STRING sParams, STRING sMode = "w")
+STRING sPath;
+STRING sFile;
+INT hFile;
+
+	sPath = ParameterGet("CtEdit","Run","C:\Citect\User\Example");
+	IF StrRight(sPath, 1) = "\" THEN
+		sFile = sPath + "Filter.Txt";
+	ELSE
+		sFile = sPath + "\Filter.Txt";
+	END
+        hFile=FileOpen(sFile, sMode);
+        FileWrite(hFile, sParams);
+        FileClose(hFile);
+END
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              GetDateString
+//
+//      NOTES:
+//            Used by Function AlarmFilterForm. Create a valid date string from selected combobox
+//            values.
+//*******************************************************************************************
+STRING
+FUNCTION GetDateString(STRING sYear, STRING sMonth, STRING sDay)
+STRING sDate;
+        /* Find out date/time format and delimiters of the system */
+        IF m_sDateFormat = "" THEN m_sDateFormat = DateInfo(1, 0); END
+        IF m_sDateDel = "" THEN m_sDateDel = DateInfo(2, 0); END
+
+        /* Create valid date strings */
+        Select Case m_sDateFormat
+        CASE "0"    /* mm-dd-yyyy */
+            sDate = sMonth + m_sDateDel + sDay + m_sDateDel + sYear;
+        CASE "1"    /* dd-mm-yyyy */
+            sDate = sDay + m_sDateDel + sMonth + m_sDateDel + sYear;
+        CASE "2"    /* yyyy-mm-dd */
+            sDate = sYear + m_sDateDel + sMonth + m_sDateDel + sDay;
+        End Select
+	RETURN sDate;
+END
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              GetTimeString
+//
+//      NOTES:
+//            Used by Function AlarmFilterForm. Create a valid time strng from selected combobox
+//            values.
+//*******************************************************************************************
+STRING
+FUNCTION GetTimeString(STRING sHour, STRING sMin, STRING sSec)
+STRING sTime;
+
+        IF m_sTimeDel = "" THEN m_sTimeDel = TimeInfo(2); END
+        /* Create valid time strings */
+        sTime = sHour + m_sTimeDel + sMin + m_sTimeDel + sSec;
+	RETURN sTime;
+END
+
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              EvaluteOptions
+//
+//      NOTES:
+//            Used by Function FilterForm. It evaluates all entries before passing them
+//            to function AlarmSetQuery. Message can only handle five lines of message.
+//*******************************************************************************************
+INT
+FUNCTION EvaluteOptions(INT nIndex,STRING chkArea,STRING fldArea,STRING chkCate,
+STRING fldCate,STRING chkDate, INT nD1,INT nD2,INT nT1,INT nT2,STRING chkName,
+STRING fldName,STRING chkState,STRING cboState,STRING chkTag,STRING fldTag, 
+STRING chkType,STRING cboType, STRING cboDTOpt)
+
+STRING ErrMsg = "";
+STRING ErrTitle;
+INT nSearchOpt = FALSE;
+
+    Select Case nIndex
+    Case 0
+        ErrTitle = "@(Active Alarm Filter Error)";
+    Case 1
+        ErrTitle = "@(Summary Alarm Filter Error)";
+    Case 2
+        ErrTitle = "@(Disabled Alarm Filter Error)";
+    End Select
+    
+    If chkArea = "1" And fldArea = "" Then
+        ErrMsg = ErrMsg + "Option <Area> selected, but the field is empty !";
+    End
+    If chkCate = "1" And fldCate = "" Then
+        IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+        ErrMsg = ErrMsg + "Option <Category> selected, but the field is empty !";
+    End
+    If chkDate = "1" THEN
+        SELECT CASE StrLeft(cboDTOpt, 1)
+        CASE "1", "4"
+            nSearchOpt = (nD1 < 0 OR nD2 < 0 OR nT1 < 0 OR nT2 < 0);
+        CASE "2" /*DATE Only */
+            nSearchOpt = (nD1 < 0 OR nD2 < 0);
+        CASE "3" /*TIME Only */
+            nSearchOpt = (nT1 < 0 OR nT2 < 0);
+        END SELECT
+        IF nSearchOpt THEN
+            IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+            ErrMsg = ErrMsg + "Option <Date> selected, but date/time is invalid !";
+        END
+    End
+    If chkName = "1" And fldName = "" Then
+        IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+        ErrMsg = ErrMsg + "Option <Name> selected, but the field is empty !";
+    End
+    If chkState = "1" And cboState = "" Then
+        IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+        ErrMsg = ErrMsg + "Option <State> selected, but the field is empty !";
+    End
+    If chkTag = "1" And fldTag = "" Then
+        IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+        ErrMsg = ErrMsg + "Option <Tag> selected, but the field is empty !";
+    End
+    If chkType = "1" And cboType = "" Then
+        IF ErrMsg <> "" THEN ErrMsg = ErrMsg + "^n"; END
+        ErrMsg = ErrMsg + "Option <Type> selected, but the field is empty !";
+    End
+    If ErrMsg = "" Then
+        RETURN 0;
+    Else
+        Message(ErrTitle, ErrMsg, 32);
+        RETURN 1;
+    End
+End
+
+
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              ClearFormOptions
+//
+//      NOTES:
+//            It clears all filter options. It can be called on the alarm page any time.
+//*******************************************************************************************
+Function ClearFormOptions(INT nIndex = 0, INT hData = -1)
+	IF (hData < 0) THEN
+		hData = _FormDataGetHnd();
+	END
+
+	SELECT CASE nIndex
+	CASE 0
+	    m_sachkArea[hData] = "0";   /* Check box 1 */
+	    m_sachkCategory[hData] = "0";   /* Check box 2 */
+	    m_sachkDate[hData] = "0";   /* Check box 3 */
+	    m_sachkName[hData] = "0";   /* Check box 4 */
+	    m_sachkState[hData] = "0";  /* Check box 5 */
+	    m_sachkTag[hData] = "0";    /* Check box 6 */
+	    m_sachkType[hData] = "0";   /* Check box 7 */
+	CASE 1
+	    m_sschkArea[hData] = "0";   /* Check box 1 */
+	    m_sschkCategory[hData] = "0";   /* Check box 2 */
+	    m_sschkDate[hData] = "0";   /* Check box 3 */
+	    m_sschkName[hData] = "0";   /* Check box 4 */
+	    m_sschkState[hData] = "0";  /* Check box 5 */
+	    m_sschkTag[hData] = "0";    /* Check box 6 */
+	    m_sschkType[hData] = "0";   /* Check box 7 */
+	CASE 2
+	    m_sdchkArea[hData] = "0";   /* Check box 1 */
+	    m_sdchkCategory[hData] = "0";   /* Check box 2 */
+	    m_sdchkDate[hData] = "0";   /* Check box 3 */
+	    m_sdchkName[hData] = "0";   /* Check box 4 */
+	    m_sdchkState[hData] = "0";  /* Check box 5 */
+	    m_sdchkTag[hData] = "0";    /* Check box 6 */
+	    m_sdchkType[hData] = "0";   /* Check box 7 */
+	END SELECT
+END
+
+
+//*******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      AUTHOR: Jacky Lang
+//
+//      DATE:   September 2000
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              AlarmResetQuery
+//
+//      ARGUMENTS
+//              nAN   ,	The AN of the alarm list, default is -1 (all lists) if not specified
+//
+//      NOTES:
+//            It reset alarm query (set by function AlarmSetQuery).
+//*******************************************************************************************
+FUNCTION
+AlarmResetQuery(INT nAN = -1)
+    AlarmSetQuery(nAN, "","");
+End
+
+
+//******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      DATE:   April 2010
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              _FormDataGetHnd
+//
+//      ARGUMENTS
+//              None
+//
+//      NOTES:
+//            Returns the window number of the caller to maintain multiple instance of form
+//				data per window.
+//*******************************************************************************************
+PRIVATE
+INT
+FUNCTION
+_FormDataGetHnd()
+	INT winNo = WinNumber();
+
+	IF (winNo < 0) OR (winNo >= c_WINDOWS_MAX) THEN
+		winNo = 0;
+	END
+	// Ensure data is initialized before it is used
+	_FormDataInit(winNo);
+
+	RETURN winNo;
+END
+
+//******************************************************************************************
+//      FILE:   AFilter.ci
+//
+//      DATE:   April 2010
+//
+//      REVISION:
+//
+//      FUNCTION:
+//              _FormDataInit
+//
+//      ARGUMENTS
+//              hData = handle to saved form data
+//
+//      NOTES:
+//            Initialize an instance of form data if it is not already initialized.
+//*******************************************************************************************
+PRIVATE
+FUNCTION
+_FormDataInit(INT hData)
+	IF NOT m_FormDataInited[hData] THEN
+		m_FormDataInited[hData] = 1;
+
+		// Active alarm
+		m_safldArea[hData] = "0";
+		m_safldCategory[hData] = "0";
+		m_safldName[hData] = "";
+		m_sacboState[hData] = "ON";
+		m_safldTag[hData] = "";
+		m_sacboType[hData] = "Acknowledged";
+		m_safldDate1[hData] = "";
+		m_safldDate2[hData] = "";
+		m_safldTime1[hData] = "";
+		m_safldTime2[hData] = "";
+		m_saYear1[hData] = "";
+		m_saYear2[hData] = "";
+		m_saMonth1[hData] = "";
+		m_saMonth2[hData] = "";
+		m_saDay1[hData] = "";
+		m_saDay2[hData] = "";
+		m_saHour1[hData] = "";
+		m_saHour2[hData] = "";
+		m_saMin1[hData] = "";
+		m_saMin2[hData] = "";
+		m_saSec1[hData] = "";
+		m_saSec2[hData] = "";
+		m_sacboDTOpt[hData] = "1 - Datetime";
+		m_sacboShiftInfo[hData] = "(07:00:00) -> (15:00:00) Morning";
+
+		// Summary alarm
+		m_ssfldArea[hData] = "0";
+		m_ssfldCategory[hData] = "0";
+		m_ssfldName[hData] = "";
+		m_sscboState[hData] = "ON";
+		m_ssfldTag[hData] = "";
+		m_sscboType[hData] = "Acknowledged";
+		m_ssfldDate1[hData] = "";
+		m_ssfldDate2[hData] = "";
+		m_ssfldTime1[hData] = "";
+		m_ssfldTime2[hData] = "";
+		m_ssYear1[hData] = "";
+		m_ssYear2[hData] = "";
+		m_ssMonth1[hData] = "";
+		m_ssMonth2[hData] = "";
+		m_ssDay1[hData] = "";
+		m_ssDay2[hData] = "";
+		m_ssHour1[hData] = "";
+		m_ssHour2[hData] = "";
+		m_ssMin1[hData] = "";
+		m_ssMin2[hData] = "";
+		m_ssSec1[hData] = "";
+		m_ssSec2[hData] = "";
+		m_sscboDTOpt[hData] = "1 - Datetime";
+		m_sscboShiftInfo[hData] = "(07:00:00) -> (15:00:00) Morning";
+		m_ssOnDateOpt[20] = "1";
+		m_ssOffDateOpt[20] = "";
+		m_ssAckDateOpt[20] = "";
+
+		// Disabled alarm
+		m_sdfldArea[hData] = "0";
+		m_sdfldCategory[hData] = "0";
+		m_sdfldName[hData] = "";
+		m_sdcboState[hData] = "ON";
+		m_sdfldTag[hData] = "";
+		m_sdcboType[hData] = "Acknowledged";
+		m_sdfldDate1[hData] = "";
+		m_sdfldDate2[hData] = "";
+		m_sdfldTime1[hData] = "";
+		m_sdfldTime2[hData] = "";
+		m_sdYear1[hData] = "";
+		m_sdYear2[hData] = "";
+		m_sdMonth1[hData] = "";
+		m_sdMonth2[hData] = "";
+		m_sdDay1[hData] = "";
+		m_sdDay2[hData] = "";
+		m_sdHour1[hData] = "";
+		m_sdHour2[hData] = "";
+		m_sdMin1[hData] = "";
+		m_sdMin2[hData] = "";
+		m_sdSec1[hData] = "";
+		m_sdSec2[hData] = "";
+		m_sdcboDTOpt[hData] = "1 - Datetime";
+		m_sdcboShiftInfo[hData] = "(07:00:00) -> (15:00:00) Morning";
+	END
+END
+
+FUNCTION 
+AddYearList()
+	INT currentYear = DateYear(TimeCurrent(),1);
+   	AddListItem(currentYear - 10, currentYear + 1, 1);
+END

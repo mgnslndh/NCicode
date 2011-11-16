@@ -1,0 +1,143 @@
+
+/*
+**      FILE:	DDEWrite.ci
+**
+**      This file contains DDEWriteLn functions for the Example database. The TagExportDDE
+**      Function is called via DDE from DDEFORMU.XLS when CSV mode is used to get a block
+**      of tags.
+*/  
+    
+/* ------------------------------- DDEFormu.xls Functions ----------------------------
+** Function Name : GetTagVal
+** 
+** Function performs a TagRead to get the value of the Tag passed to it. If TagRead
+** returns a null string the function returns "0". This is necessary because DDE does
+** handle null strings very well.
+**
+*/
+
+String
+Function GetTagVal(String sTag)
+	String sTagValue;
+	sTagValue = TagRead(sTag);
+	If sTagValue = "" Then
+		Return "0";
+	Else
+		Return StrTrim(sTagValue);
+	End
+End
+
+/* Function Name : TagExportDDE
+**
+** Function is called from DDEFORMU.XLS (using DDEExecute). The text file (sFile) is created by
+** DDEFORMU.XLS prior to calling the function. It contains a list of Tags (each on a new line)
+** to be processed. The function reads the Tag list line by line and composes a CSV string (sData)
+** to be passed to DDEhWriteln each time the desired number of columns (iWidth) is reached.
+**
+** If the number of columns is 1 and the Tag Names are not to pasted, DDEhSetMode is set to
+** "Normal" otherwise it is set to "CSV".
+**
+** If the Tag Names are to be pasted (iPasteTags = 1) and the number of columns is more than 1, the Tag
+** Tag Names and Values are sent in altenate lines (Tag Names) first. If there is only 1 column, a
+** Tag Name/Value pair is sent per line.
+**
+** The iLogKernel parameter can be turned ON and OFF from the DDEFORM.XLS form to view the processing
+** time required by Citect
+**
+** The Application (sApplication) is in either the local DDE or NetDDE format as appropriate. The Topic
+** (sTopic) has either the worksheet files name for local DDE or the DDE Sharename for NetDDE. The Item
+** (sItem) is the target Range in Excel R1C1 format (eg "R1C1:R50C2").
+**
+** If multiple columns are requested and the last line does not contain a full line of data, the empty
+** values are filled with "XXX" for the Tag Names and "0" for the values.
+**
+*/
+
+Function TagExportDDE(String sApplication, String sTopic, String sItem, 
+		   String sFile, Int iWidth, Int iPasteTags, Int iLogKernel)
+
+	Int hFile;
+	Int hTagExportDDE
+	Int iCnt;
+	Int iPtr;
+	Int iStartTime;
+	Int iTagCount;
+	String sTag;
+	String sData;
+	String sTagNames;
+
+	iStartTime = TimeCurrent();
+	iTagCount = 0;
+	hFile = -1;
+	iCnt = 1;
+	sData = "";
+	sTagNames = "";
+
+	If iLogKernel = 1 then
+		TraceMsg(sApplication + "<>" + sTopic + "<>" + sItem + "<>" + sFile);
+	End
+
+	hTagExportDDE = DDEhInitiate(sApplication, sTopic);
+	If (iWidth = 1) And (iPasteTags = 0) Then
+		DDEhSetMode(hTagExportDDE, 1);
+	Else
+		DDEhSetMode(hTagExportDDE, 2);
+	End
+	hFile = FileOpen(sFile, "r");
+	If hFile = -1 AND iLogKernel = 1 Then
+		TraceMsg("<DDEFORMU.XLS> Error opening >" + sFile + "<");
+	Else
+		While Not FileEOF(hFile) Do
+			sTag = FileReadLn(hFile);
+			iTagCount = iTagCount + 1;
+			If iCnt = 1 Then
+				If (iPasteTags =1) And (iWidth = 1) Then
+					sData = sTag + "," + GetTagVal(sTag);
+					sTagNames = sTag;
+				Else
+					sData = GetTagVal(sTag);
+					sTagNames = sTag;
+				End
+			Else
+				sData = sData + "," + GetTagVal(sTag);
+				sTagNames = sTagNames + "," + sTag;
+			End
+			If iCnt < iWidth Then
+				iCnt = iCnt + 1;
+			Else
+				If iLogKernel = 1 Then
+					!TraceMsg("<DDEFORMU.XLS>" + IntToStr(iCnt) + "<>" + IntToStr(StrLength(sTagNames)) + "<>" + sTagNames +"<");
+					!TraceMsg("<DDEFORMU.XLS>" + IntToStr(iCnt) + "<>" + IntToStr(StrLength(sData)) + "<>" + sData +"<");
+				End
+				If (iPasteTags = 1) And (iWidth > 1) Then
+					DDEhWriteLn(hTagExportDDE, "", sTagNames);
+				End
+				DDEhWriteLn(hTagExportDDE, "", sData);
+				iCnt = 1;
+				sTagNames = "";
+				sData = "";
+			End
+		End
+		FileClose(hFile);
+		If (iCnt <= iWidth) And (sData <> "") Then
+			For iPtr = iCnt to iWidth Do
+				sTagNames = sTagNames + ",XXX";
+				sData = sData + ",0";
+			End
+		End
+
+		If (iPasteTags = 1) And (iWidth > 1) And (sData <> "") Then
+			DDEhWriteLn(hTagExportDDE, "", sTagNames);
+		End
+		If (iWidth > 1) And (sData <> "") Then
+			DDEhWriteLn(hTagExportDDE, "", sData);
+		End
+		DDEhWriteLn(hTagExportDDE, sItem, "");
+		DDEhTerminate(hTagExportDDE);
+	End
+	If iLogKernel = 1 Then
+		TraceMsg("<DDEFORMU.XLS>" + IntToStr (TimeCurrent() - iStartTime) + " Seconds for " + 
+		IntToStr(iTagCount) + " Tags = " + IntToStr(iTagCount/(TimeCurrent() - 
+		iStartTime)) + " Tags/Sec>");
+	End
+End

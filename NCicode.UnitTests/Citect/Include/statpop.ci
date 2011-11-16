@@ -1,0 +1,328 @@
+/*
+**	FILE:	STATPOP.CI
+**
+**
+**	FUNCTIONS:
+**		***	User functions ***
+**              TrendStatWin
+**              TrendPageData
+**              DspTrnPen
+**              DspTrnData
+**
+**	NOTE:	Variable Information;
+**
+**		Data type BINARY is a special Citect LABEL for cicode 
+**		data type (INT)
+**
+**		Variable Prefixes;
+**		h		Local function var handle type	(cicode int)
+**		i		Local function var integer type
+**		b		Local function var binary type	(cicode int, uses BINARY substitition as above)
+**		s		Local function var string type
+**		r		Local function var real type
+**
+**		gh		Global file var handle type	(cicode int)
+**		gi		Global file var integer type
+**		gb		Global file var binary type	(cicode int, uses BINARY substitition as above)
+**		gs		Global file var string type
+**		gr		Global file var real type
+**
+**		_		Label defined in LABELS.DBF (remaining letters capitalised)
+**
+**		none of above	Any variable starting with a capital letter is a VARIABLE TAG as defined
+**				in the Variable Tags database
+**   
+**	
+**	How Trend Statistics work:
+**		When the "!TrendStats page" button on the SingleTrend is 
+**		pressed 
+**		1 ) !TrendStats page is displayed.
+**		2 ) A task is created to collect data for the pens
+**		    on the SingleTrend page. This task puts all collected
+**		    data into global buffers so that the functions that
+**		    are working on the !TrendStats page (DspTrnPen and 
+**		    DspTrnData) can display the trend data statistics.
+**		3 ) !TrendStats page performs statistics calculation on
+**		    the trend data collected by the task.
+*/
+
+/*	GLOBAL VARIABLES */
+
+
+        STRING  gsTablePen[8];
+        REAL    grTrnBuf[8][1800];
+
+        INT     gnSamples	= 0;
+	INT	gTimeUpdate 	= 0;	
+	REAL	gStats[8][4];
+	STRING	gsTrendStats	= "!TrendStats";
+	STRING	gsWindowTitle	= "@(!TrendStats)";
+	INT	gTrendTask	= BAD_HANDLE;
+	INT	gTrendWnd	= BAD_HANDLE;
+
+/* defines (constants)  */
+
+	INT	TRN_MODE_REALTIME = 0;
+
+/* 
+**	trend page instance offsets 
+**	
+**	IMPORTANT NOTE:
+**	If these offsets are changed the ones in trend.ci
+**	should also be updated.
+*/
+
+	INT	TRN_AN			= 12;   
+
+/*
+**	FUNCTION NAME:	        TrendStatWin
+**
+**	FUNCTION DESCRIPTION:	This function is used to create a new task 
+**				which will get the trend data to update
+**                              the !TrendStats page. 
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96		Jeffrey Sun	Original
+**		 8/796		Erhan	Izmir	Modified
+**		6/4/99		Welly Santosa	Modified
+**
+**	SOURCE:			Called from the animated button on the 
+**				trend page.
+**	ARGUMENTS:
+**
+**              hAn             Animation number of the trend.
+**	RETURNED VALUE:
+**
+**	NOTES:
+*/
+
+
+FUNCTION
+TrendStatWin(INT hAN)
+
+	INT	hWnd;
+	INT	hTask;
+	INT	nWinTrend;
+
+	nWinTrend = WinNumber();
+
+	PageSetInt(TRN_AN,hAn);
+
+	hWnd = WndFind(gsWindowTitle);
+	IF hWnd = 0 THEN 
+                gTrendWnd = WinNewAt(gsTrendStats,45,25,79);
+		IF gTrendWnd <> BAD_HANDLE THEN
+			WinSelect(nWinTrend);
+			IF gTrendTask <> BAD_HANDLE THEN
+				TaskKill(gTrendTask);
+			END
+        		gTrendTask = TaskNew("TrendPageData","",0);
+		ELSE
+                       	Message("Configuration Error",sConfigErrMsg(gsTrendStats,"trnpopstat"),0);
+                END
+	ELSE
+		WinGoto(gTrendWnd);
+	END
+END
+
+
+/*
+**	FUNCTION NAME:		TrendPageData
+**
+**	FUNCTION DESCRIPTION:	This function is used to get the 
+**				trend data on the trend page and
+**				put it into global buffers to be
+**				used by !TrendStats page functions.
+**
+**	REV	DATE		WHO		DESCRIPTION
+**	1	12/6/96		Jeffrey Sun	Original
+**	2	 8/7/96		Erhan Izmir	Modified
+**	3	22/7/97		Sam Kenny	Modified (fPeriod in TrnGetTable)
+**	4	6/4/99		Welly Santosa	Modified
+**
+**	SOURCE:			Called by the task created in the
+**				TranStatWin function. TranStatWin
+**				function is activated when statistics
+**				button on the trend page is pressed.
+**	ARGUMENTS:
+**
+**	RETURNED VALUE:
+**	NOTES:
+*/
+
+FUNCTION
+TrendPageData()
+
+        INT     iPen;
+	INT	TimeStart = 0;
+	INT	TimeEnd   = 0;
+	INT	hTask;
+	REAL	fPeriod   = 0;
+	INT	hAn;
+	INT	timeNow;
+	INT	lastTime;
+	INT	updateTime;
+	INT DisplayMode;
+
+	lastTime = 0;
+
+        WHILE 1 DO
+
+                ErrSet(1);
+		timeNow = TimeCurrent();
+		updateTime = lastTime + fPeriod;
+		IF timeNow >= updateTime THEN
+ 
+			lastTime = timeNow;
+			DspRubberEnd(); 
+			DspRubberCheckAreaSelected();
+
+			hAn 	    = PageGetInt(TRN_AN);
+			TimeStart   = _TrendZoomGetStart(hAn,TRN_PERIODIC);
+			TimeEnd     = _TrendZoomGetEnd(hAn,TRN_PERIODIC);
+			fPeriod     = TrnGetPeriod(hAn);
+			gnSamples   = _TrendZoomGetSamples(hAn,TimeEnd,TimeStart,fPeriod,TRN_PERIODIC);
+
+			if gnSamples > 1800 then
+				tracemsg("Too many samples "+intToStr(gnSamples));
+ 				gnSamples = 1800;
+				errSetHw(2,259);
+			end
+
+			gTimeUpdate = updateTime;
+
+			DspRubberRedraw();
+
+     			FOR iPen = 0 TO  7 DO
+  		              gsTablePen[iPen] = TrnGetPen(hAn,iPen+1);
+  	                      IF gsTablePen[iPen] <> "" THEN
+  	                      		   DisplayMode = (TrnGetDisplayMode(hAN, iPen) BITAND 0xFFFFFFFC) + 1;
+ 	                               TrnGetTable(gsTablePen[iPen],TimeEnd,fPeriod,gnSamples,grTrnBuf[iPen][0],DisplayMode);
+  	                      END
+  	        	END
+		END
+
+                ErrSet(0);
+
+                Sleep(1);
+
+     		FOR iPen = 0 TO  7 DO
+  	              	IF gsTablePen[iPen] <> TrnGetPen(hAn,iPen+1) THEN
+				lastTime = 0;
+			END
+  	       	END
+
+		IF fPeriod <> TrnGetPeriod(hAn) THEN
+			lastTime = 0;
+		END
+		
+		IF WndFind(gsWindowTitle) = 0 THEN
+			gTrendTask = BAD_HANDLE;
+			gTrendWnd = BAD_HANDLE;
+
+			RETURN;
+		END
+		
+        END
+
+END
+   
+/*
+**	FUNCTION NAME:		DspTrnPen
+**
+**	FUNCTION DESCRIPTION:	This function is used to return the pen name on the statpop page.
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96		Jeffrey Sun	Original
+**
+**	SOURCE:			Called from the string animaion in pen name boxes on the statpop page.
+**	ARGUMENTS:
+**              iNoPen          No. of pen.
+**
+**	RETURNED VALUE:
+**	NOTES:
+*/
+
+
+STRING
+FUNCTION
+DspTrnPen(INT iNoPen)
+
+        RETURN gsTablePen[iNoPen];
+
+END
+
+/*
+**	FUNCTION NAME:		DspTrnData
+**
+**	FUNCTION DESCRIPTION:	This function is used to return the 
+**				statistic data on the !TrendStats page.
+**
+**	REV	DATE		WHO		DESCRIP
+**	1.0	12/6/96		Jeffrey Sun	Original
+**
+**	SOURCE:			Called from the string animation in 
+**				statistic data boxes on the !TrendStats page.
+**	ARGUMENTS:
+**              iPenNo:         No. of pen name.
+**              iMode=0:        Minimum.
+**              iMode=1:        Maximum.
+**              iMode=2:        Average.
+**              iMode=3:        Standard Deviation.
+**
+**	RETURNED VALUE:
+**	NOTES:
+**		If the number of samples is less than 2 then it is 
+**		very likely that the user has just clicked the mouse
+**		to erase the rubber band and mouse has moved couple of
+**		pixels because of a handshake or something and a new
+**		(very small) rubber band has been drawn. In that case
+**		the calculations are not performed and the AreaSelected
+**		flag is reset (in zoom.ci file - DspRubberCheckAreaSelected
+**		function)  to erase the unwantedly drawn rubber band.
+**		
+*/
+
+
+STRING
+FUNCTION
+DspTrnData(INT iPenNo,INT iMode)
+
+	REAL 	value;
+	INT		validValue = 0;
+	
+	IF TimeCurrent() >= gTimeUpdate THEN
+		
+        	IF gsTablePen[iPenNo] <> "" THEN
+
+			IF gnSamples >= 2 THEN
+                		gStats[iPenNo][iMode] = TableMath(grTrnBuf[iPenNo][0],gnSamples,iMode,1);
+			END
+        	ELSE
+                	gStats[iPenNo][iMode] = 1.0e36;
+        	END
+	END
+
+	value = gStats[iPenNo][iMode];
+	validValue = TrnIsValidValue(value);
+	
+	IF validValue = 0 THEN
+		IF value > 1.0e35 AND value < 1.0e37 THEN
+			RETURN "";
+		ELSE
+			IF value >= 1.2e37 OR value <= -1.2e37 THEN
+				value = 0.0;
+			END
+
+        	RETURN RealToStr(value,6,2);
+		END
+	ELSE
+		IF validValue = 1 THEN
+			RETURN "<gated>";
+		ELSE
+			RETURN "<na>";
+		END
+	END		
+END
+
+
+       

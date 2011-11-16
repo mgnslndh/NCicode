@@ -1,0 +1,17 @@
+//////////////////////////////
+// Open the tag event queue //
+//////////////////////////////
+INT
+FUNCTION
+TagEventQueue()
+	RETURN QueOpen("TagEventQueue", 0);
+END
+
+//////////////////////////////////////
+// Get the format for the tag event //
+//////////////////////////////////////
+INT
+FUNCTION
+TagEventFormat()
+	RETURN FmtOpen("TagEventFormat", "{Driver,16}{Port,32}{Unit,32}{Tag,80}{Seconds,10}{Milliseconds,3}{Value,16}{Quality,5}", 1);
+END

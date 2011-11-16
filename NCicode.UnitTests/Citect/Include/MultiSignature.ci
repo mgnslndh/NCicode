@@ -1,0 +1,885 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:	MultiSignature.ci
+//
+//	DESCRIPTION:
+//
+//		Contains a forms-based example implementation of authenticating 
+//		multiple signatures in order to approve an operation.
+//
+//	PUBLIC FUNCTIONS:
+//
+//		MultiSignatureForm
+//		MultiSignatureTagWrite
+//				
+// 	NOTES: 
+//
+//		Requires Scada >= 7.10.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Signature form
+INT		hSigForm				= -1;
+INT		hOperationField			= -1;
+INT		hStatusPrompt			= -1;
+INT		nXPos					= 0;		// x-position of the form.
+INT		nYPos					= 0;		// y-position of the form.
+INT		ndefaultFormMode		= 405;		// 1 + 4 + 16 + 128 + 256.  Default modes used when opening forms.
+
+// Usernames to verify
+STRING	sUserInfo[4][3];				// Array of usernames and their corresponding verification status and field handle.
+INT		nTotalUsers 			= 0;		// Total number of users that must sign the form (1 - 4).
+
+// Authentication form
+INT		hAuthForm				= -1;
+INT		hUsernameField			= -1;
+INT		hPasswordField 			= -1;
+INT		hStatusField			= -1;
+INT		bAuthenticationInProgress	= FALSE;	// Whether an authentication attempt is currently active.
+
+// Operation results
+STRING	sApproved				= "APPROVED";
+STRING	sCancelled				= "CANCELLED";
+
+// Verification results
+STRING	sVerifySucceeded		= "VERIFY_SUCCEEDED";
+STRING	sVerifyCancelled		= "VERIFY_CANCELLED";
+
+// Form controls
+STRING	sVerifiedPrompt			= "    @(Verified)";
+STRING	sVerifiedButton			= "  @(Verify)  ";
+STRING	sApproveButton			= "  @(Approve) ";
+STRING	sCancelButton			= "  @(Cancel)  ";
+STRING	sDefaultStatusPrompt 	= "@(Approval is pending verification of the above users).";
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			MultiSignatureTagWrite
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays a form that allows up for 4 users to have their credentials verified in order
+//			to approve a write of a specific value to a specific tag.  If all users are verified
+//			successfully, the write to the tag is performed by this function before it returns.
+//			The usernames can be Citect OR Windows users.
+//			
+// 		ARGUMENTS:
+//
+//			sTagName				- The name of the tag to which a write needs to be approved.
+//			sValueToWrite			- The value to write to the tag if approval succeeds.
+//			sLogDevice				- The name of a log device if logging is required, otherwise "".
+//			user1					- The username for the first user or "".
+//			user2					- The username for the second user or "".
+//			user3					- The username for the third user or "".
+//			user4					- The username for the forth user or "".
+//			
+//     	RETURNED VALUE: 
+//
+//			TRUE if the credentials of all users were verified (and therefore the value was 
+//			written to the specified tag), otherwise FALSE.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PUBLIC INT FUNCTION MultiSignatureTagWrite(	STRING sTagName, 
+											STRING sValueToWrite, 
+											STRING sLogDevice, 
+											STRING sUser1, 
+											STRING sUser2, 
+											STRING sUser3, 
+											STRING sUser4)
+
+	INT nResult = FALSE;											
+	STRING sOperationDesc;
+	
+	IF (TagGetProperty(sTagName, "Type", 0) <> "") THEN
+		sOperationDesc = StrToLocalText("@(Writing value)") + " '" + sValueToWrite + "' " + StrToLocalText("@(to tag)") + " '" + sTagName + "'.";
+	
+		nResult = MultiSignatureForm(sOperationDesc, sLogDevice, sUser1, sUser2, sUser3, sUser4);
+		
+		IF (nResult) THEN
+			TagWrite(sTagName, sValueToWrite);
+		END
+	END
+	
+	RETURN nResult;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			MultiSignatureForm
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays a form that allows up for 4 users to have their credentials verified in order
+//			to approve an operation.  The usernames can be Citect or Windows users.
+//			
+// 		ARGUMENTS:
+//
+//			sOperationDescription	- A description of the operation that requires approval.
+//			sLogDevice				- The name of a log device if logging is required, otherwise "".
+//			sUser1					- The username for the first user or "".
+//			sUser2					- The username for the second user or "".
+//			sUser3					- The username for the third user or "".
+//			sUser4					- The username for the forth user or "".
+//			
+//     	RETURNED VALUE: 
+//
+//			TRUE if the credentials of all users were verified, otherwise FALSE.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PUBLIC INT FUNCTION MultiSignatureForm(STRING sOperationDescription, STRING sLogDevice, STRING sUser1, STRING sUser2, STRING sUser3, STRING sUser4)
+
+	INT		nPixelsPerColumn	= 6;
+	INT		nPixelsPerRow		= 18;
+	INT		nButtonColumn		= 42;			// Location of the column of 'Verify' buttons.
+	INT		nUserIndex			= 0;			// Counter for working with the array of users.
+	INT		nUserRow			= 0;			// Counter for dynamically positioning users on the form.
+	INT		bCancelled			= FALSE;
+	INT		bApproved			= FALSE;
+	INT		bOperationComplete	= FALSE;
+	STRING	sOperationResult	= "";
+	STRING	sNotUsed			= "";
+	STRING	sStatusPrompt		= sDefaultStatusPrompt;
+	
+	// Add the specifies user names to an array, ignoring blank names.
+	nTotalUsers = CollateUsernames(sUser1, sUser2, sUser3, sUser4);
+	
+	IF (nTotalUsers = 0) THEN
+		ErrTrap(274,FALSE);
+		RETURN FALSE;
+	END
+	
+	// Calculate the offset of the form to the page
+	nXPos = (StrToInt(PageInfo(12)) - 55 * nPixelsPerColumn)/ 2;
+	nYPos = (StrToInt(PageInfo(13)) - (7 + (2 * nTotalUsers)) * nPixelsPerRow) / 2;
+	
+	// Adjust form position in case the parent page was moved out of the default posistion (0,0)
+	nXPos = nXPos + StrToInt(PageInfo(14));
+	nYPos = nYPos + StrToInt(PageInfo(15));
+	
+	WHILE (NOT bCancelled AND NOT bApproved) DO
+
+		hSigForm = FormNew("@(Signature Verification)", 60, 7 + (2 * nTotalUsers), nDefaultFormMode);
+		FormPosition(nXPos, nYPos, 0);
+		FormField(2, 1, 50, 10, 3, sNotUsed, "@(This operation requires approval from all the following people):", 0);
+		
+		nUserRow = 3;	// Location of first username on the signature form.
+		FOR nUserIndex = 0 TO (nTotalUsers - 1) DO
+
+			// Store the handle to the prompt		
+			sUserInfo[nUserIndex][2] = IntToStr(FormPrompt(2, nUserRow, IntToStr(nUserIndex + 1) + ". " + sUserInfo[nUserIndex][0]));
+			
+			IF (IsUserVerified(nUserIndex)) THEN
+				FormPrompt(nButtonColumn, nUserRow, sVerifiedPrompt);
+			ELSE
+				AddVerifyButton(nUserRow, nButtonColumn, nUserIndex);
+			END
+			
+			nUserRow = nUserRow + 2;
+		END
+		
+		// Adjust the group box border to ensure it displays correctly...
+		IF (nTotalUsers = 4) THEN
+			hOperationField = FormGroupBox(0, 0, 60, 1 + (2 * nTotalUsers), "@(Operation): " + sOperationDescription);
+		ELSE
+			hOperationField = FormGroupBox(0, 0, 60, 2 + (2 * nTotalUsers), "@(Operation): " + sOperationDescription);
+		END
+		
+		// Add the status prompt.
+		hStatusPrompt = FormPrompt(1, 4 + (2 * nTotalUsers), sStatusPrompt);
+		
+		// Add the 'Approve' button if all users are verified.
+		IF (AllUsersAreVerified()) THEN
+			FormButton(nButtonColumn - 13, 6 + (2 * nTotalUsers), sApproveButton, ApproveOperation, 0);
+		END
+		
+		// Always add the 'Cancel' button.
+		FormButton(nButtonColumn, 6 + (2 * nTotalUsers), sCancelButton, CancelOperation, 0);
+		
+		bOperationComplete = FALSE;
+		FormSetInst(hSigForm, hOperationField, bOperationComplete, "");
+		
+		FormRead(1);
+
+		WHILE (NOT bOperationComplete) DO
+			SleepMS(100);
+			FormGetInst(hSigForm, hOperationField, bOperationComplete, sOperationResult);
+		END
+		
+		IF (sOperationResult = sApproved) THEN
+			bApproved = TRUE;
+		
+			// Attempt to log the approval of this operation.
+			LogOperationResult(sOperationDescription, sLogDevice, TRUE);
+			
+		ELSE
+			IF (sOperationResult = sCancelled) THEN
+				bCancelled = TRUE;
+				// Attempt to log the failure of this operation.
+				LogOperationResult(sOperationDescription, sLogDevice, FALSE);
+			ELSE
+				// Verification operation has completed (may have either succeeded, failed or was cancelled).
+				
+				// Update the list of users whose credentials have been successfully verified.
+				UpdateVerifiedUsers();
+				
+				// Update the status prompt to display the result of the verification.
+				IF (sOperationResult = sVerifySucceeded) THEN
+					IF (AllUsersAreVerified()) THEN
+						sStatusPrompt = "@(All users verified.  This operation can now be approved).";
+					ELSE
+						sStatusPrompt = "@(Password authentication succeeded).";
+					END
+				ELSE
+					IF (sOperationResult = sVerifyCancelled) THEN
+						sStatusPrompt = sDefaultStatusPrompt;
+					ELSE
+						sStatusPrompt = sOperationResult;
+					END
+				END
+			END
+		END
+		
+		FormDestroy(hSigForm);
+	END
+	
+	RETURN bApproved;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			CollateUsernames
+//
+//     	GENERAL DESCRIPTION
+//
+//			Adds up to four users to an array of users, skipping blank usernames.
+//			
+// 		ARGUMENTS:
+//
+//			sUser1					- The username for the first user or "".
+//			sUser2					- The username for the second user or "".
+//			sUser3					- The username for the third user or "".
+//			sUser4					- The username for the forth user or "".
+//			
+//     	RETURNED VALUE: 
+//
+//			The total number of valid user names added to the array.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION CollateUsernames(STRING sUser1, STRING sUser2, STRING sUser3, STRING sUser4)
+	INT nUserCount = 0;
+
+	nUserCount = AddUsernameIfValid(sUser1, nUserCount);	
+	nUserCount = AddUsernameIfValid(sUser2, nUserCount);	
+	nUserCount = AddUsernameIfValid(sUser3, nUserCount);	
+	nUserCount = AddUsernameIfValid(sUser4, nUserCount);	
+	
+	RETURN nUserCount;	
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			AddUsernameIfValid
+//
+//     	GENERAL DESCRIPTION
+//
+//			Adds a username to a specified index in the user info array, as long as it is valid.  
+//			
+// 		ARGUMENTS:
+//
+//			sUserName				- The username for to check for validity.
+//			nUserNumber				- The next available index in the array to add the user.
+//			
+//     	RETURNED VALUE: 
+//
+//			The next available index in the array for adding another user.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION AddUsernameIfValid(STRING sUserName, INT nUserNumber)
+
+	IF (IsUserNameValid(sUserName)) THEN
+		sUserInfo[nUserNumber][0] = sUserName;		// User name
+		sUserInfo[nUserNumber][1] = "";				// Whether the user is verified.
+		sUserInfo[nUserNumber][2] = "";				// The field handle for the user name on the form.
+		
+		RETURN nUserNumber + 1;
+	END
+	
+	RETURN nUserNumber;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			IsUserNameValid
+//
+//     	GENERAL DESCRIPTION
+//
+//			Determines if a username is valid.  
+//			
+// 		ARGUMENTS:
+//
+//			sUserName				- The username for to check for validity.
+//			
+//     	RETURNED VALUE: 
+//
+//			TRUE if the username is valid, otherwise FALSE.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION IsUserNameValid(STRING sUserName)
+	IF (StrLength(sUserName) > 0) THEN
+		RETURN TRUE;
+	ELSE
+		RETURN FALSE;
+	END
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			UpdateVerifiedUsers
+//
+//     	GENERAL DESCRIPTION
+//
+//			Updates the array of users with instance data from the form that indicates whether 
+//			each user has been verified.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			None.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE FUNCTION UpdateVerifiedUsers()
+	INT nUserVerified = FALSE;
+	INT nUserIndex;
+	STRING sNotUsed;
+	
+	FOR nUserIndex = 0 TO (nTotalUsers - 1) DO
+		FormGetInst(hSigForm, StrToInt(sUserInfo[nUserIndex][2]), nUserVerified, sNotUsed);
+		IF (nUserVerified) THEN
+			sUserInfo[nUserIndex][1] = sVerifySucceeded;
+		END
+	END
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			IsUserVerified
+//
+//     	GENERAL DESCRIPTION
+//
+//			Returns whether a user is currently verified or not.  
+//			
+// 		ARGUMENTS:
+//
+//			nUserNumber				- The index of the user to check in the array.
+//			
+//     	RETURNED VALUE: 
+//
+//			TRUE if the user has been verified, otherwise FALSE.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION IsUserVerified(INT nUserIndex)
+	INT nVerified = FALSE;
+	
+	IF (nUserIndex >= 0 AND nUserIndex < nTotalUsers) THEN
+		IF (IsUserNameValid(sUserInfo[nUserIndex][0])) THEN
+			IF (sUserInfo[nUserIndex][1] = sVerifySucceeded) THEN
+				nVerified = TRUE;
+			END
+		END
+	END
+	
+	RETURN nVerified;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			AllUsersAreVerified
+//
+//     	GENERAL DESCRIPTION
+//
+//			Returns whether all valid users have been verified or not.  
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			TRUE if the all users have been verified, otherwise FALSE.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION AllUsersAreVerified()
+	INT nAllVerified = TRUE;
+	INT nUserIndex;
+	
+	FOR nUserIndex = 0 TO (nTotalUsers - 1) DO
+		IF (NOT IsUserVerified(nUserIndex)) THEN
+			nAllVerified = FALSE;
+			nUserIndex = nTotalUsers;	// break
+		END
+	END
+
+	RETURN nAllVerified;	
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			AddVerifyButton
+//
+//     	GENERAL DESCRIPTION
+//
+//			Adds a 'Verify' button for a specified user onto the current form at the specified position.  
+//			
+// 		ARGUMENTS:
+//
+//			nRow				- Row position for the new button.
+//			nColumn			- The column position for the new button.
+//			nUserNumber		- The index of the user to add in the user info array.
+//			
+//     	RETURNED VALUE: 
+//
+//			None.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE FUNCTION AddVerifyButton(INT nRow, INT nColumn, INT nUserNumber)
+	// Unfortunately we cannot store function pointers in Cicode, so we have to switch on each user number.
+	IF (nUserNumber = 0) THEN
+		FormButton(nColumn, nRow, sVerifiedButton, VerifyCredentials1, 0);
+	END
+	IF (nUserNumber = 1) THEN
+		FormButton(nColumn, nRow, sVerifiedButton, VerifyCredentials2, 0);
+	END
+	IF (nUserNumber = 2) THEN
+		FormButton(nColumn, nRow, sVerifiedButton, VerifyCredentials3, 0);
+	END
+	IF (nUserNumber = 3) THEN
+		FormButton(nColumn, nRow, sVerifiedButton, VerifyCredentials4, 0);
+	END
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			LogOperationResult
+//
+//     	GENERAL DESCRIPTION
+//
+//			Writes a message to the specified log device recording either a failed attempt or 
+//			the user's that combined to approve an operation.
+//			
+// 		ARGUMENTS:
+//
+//			sOperationDescription		- A description of the operation that requires approval.
+//			sLogDevice					- The name of a log device if logging is required, otherwise "".
+//			nApproved					- Result code of operation: 0 for cancelled, otherwise approved
+//			
+//     	RETURNED VALUE: 
+//
+//			None.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE FUNCTION LogOperationResult(STRING sOperationDescription, STRING sLogDevice, INT nApproved)
+	
+	STRING	slogResult	= "";
+	STRING	slogMessage	= "";
+	STRING	sDspMsgTitle = "";
+	STRING	sDspText     = "";
+	INT		hLogDevice	= -1;
+	INT		writeResult	= -1;
+	INT		nUserIndex	= -1;
+
+	slogMessage = TimeToStr(TimeCurrent(), 9) + " " + TimeToStr(TimeCurrent(), 1) + " @ " + GetEnv("ComputerName") + ": " + StrToLocalText("@(The operation)") + " '" + sOperationDescription + "' ";
+	IF nApproved THEN
+		sDspMsgTitle = "@(Operation Approved) - ";
+		sDspText = "@(This operation has been approved).";
+		slogMessage = slogMessage + StrToLocalText("@(was approved by the following people)") + ": ";
+		FOR nUserIndex = 0 TO (nTotalUsers - 1) DO
+			IF (IsUserVerified(nUserIndex)) THEN
+				IF (nUserIndex > 0) THEN
+					slogMessage = slogMessage + ", ";
+				END
+				slogMessage = sLogMessage + sUserInfo[nUserIndex][0];
+			END
+		END
+	ELSE
+		slogMessage = slogMessage + StrToLocalText("@(user verification attempt cancelled)");
+		sDspMsgTitle = "@(Operation Cancelled) - ";
+		sDspText = "@(This operation has been cancelled).";
+	END
+
+	slogMessage = slogMessage + ".";		
+
+	// Inform the user of the result.
+	FormNew(sDspMsgTitle + TimeToStr(TimeCurrent(), 9) + " @(at) " + TimeToStr(TimeCurrent(), 1), 70, 7, 149);
+	FormPosition(nXPos - 50, nYPos + 57, 0);
+	FormPrompt(2, 1, sDspText);
+		
+	IF (sLogDevice <> "") THEN
+	
+		ErrSet(1);
+		
+		hLogDevice = DevOpen(sLogDevice, 0);
+		IF (hLogDevice <> -1) THEN
+		
+			writeResult = DevWriteLn(hLogDevice, slogMessage);
+			IF (writeResult <> 0) THEN
+				slogResult = "@(Failed to write to log device.  Error code): " + IntToStr(writeResult);
+			END
+		
+			DevClose(hLogDevice);
+		ELSE
+			slogResult = "@(Failed to open log device).";
+		END
+
+		ErrSet(0);
+
+		// Check the result of the logging and construct a summary message for the user.
+		IF (StrLength(sLogResult) > 0) THEN
+			FormPrompt(2, 2, "@(Warning: A record of this operation could NOT be written).");
+			FormPrompt(2, 3, "@(Log device): " + sLogDevice + "     @(Error): " + sLogResult);
+		ELSE
+			FormPrompt(2, 2, "@(A log of this operation was successfully recorded)");
+			FormPrompt(2, 3, "@(to the device) '" + sLogDevice + "'.");
+		END
+	END
+	
+	FormGroupBox(0, 0, 70, 4, "@(Operation): " + sOperationDescription);
+	FormButton(59, 6, "    @(OK)    ", 0, 1);
+	FormRead(0);
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentials1
+//
+//     	GENERAL DESCRIPTION
+//
+//			Verifies the first user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION VerifyCredentials1()
+	RETURN VerifyCredentials(0);
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentials2
+//
+//     	GENERAL DESCRIPTION
+//
+//			Verifies the second user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION VerifyCredentials2()
+	RETURN VerifyCredentials(1);
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentials3
+//
+//     	GENERAL DESCRIPTION
+//
+//			Verifies the third user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION VerifyCredentials3()
+	RETURN VerifyCredentials(2);
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentials4
+//
+//     	GENERAL DESCRIPTION
+//
+//			Verifies the fourth user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION VerifyCredentials4()
+	RETURN VerifyCredentials(3);	
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentials
+//
+//     	GENERAL DESCRIPTION
+//
+//			Verifies a user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			nUserIndex	- The index of the user to verify.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 Always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION VerifyCredentials(INT nUserIndex)
+	INT hUserField;
+	INT bVerified = FALSE;
+	STRING sAuthResult = "";
+	
+	// This flag is here to ensure only one verification form can be displayed at once.
+	IF (hAuthForm <> -1) THEN
+		FormGoto(hAuthForm);
+	ELSE
+		sAuthResult = VerifyCredentialsForm(nUserIndex);
+		bVerified = (sAuthResult = sVerifySucceeded);
+		
+		hUserField = StrToInt(sUserInfo[nUserIndex][2]);
+		FormSetInst(hSigForm, hUserField, bVerified, "");
+		FormSetInst(hSigForm, hOperationField, 1, sAuthResult);
+	END
+	
+	RETURN 0;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			ApproveOperation
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the 'Approve' button on the signature form is clicked.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION ApproveOperation()
+	FormSetInst(hSigForm, hOperationField, 1, sApproved);
+	RETURN 0;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			CancelOperation
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the 'Cancel' button on the signature form is clicked.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION CancelOperation()
+
+	// Don't allow the cancel button to be clicked if there is a verification operation in progress.
+	IF (hAuthForm <> -1) THEN
+		FormGoto(hAuthForm);
+	ELSE
+		FormSetInst(hSigForm, hOperationField, 1, sCancelled);
+	END
+	
+	RETURN 0;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyCredentialsForm
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays a form for verifification of a single user's credentials using a secure password field.
+//			
+// 		ARGUMENTS:
+//
+//			nUserIndex		- The index of the user to verify.  
+//			
+//     	RETURNED VALUE: 
+//
+//			"VERIFIED", "CANCELLED", or an error message if the credentials failed to be authenticated.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE STRING FUNCTION VerifyCredentialsForm(INT nUserIndex)
+
+	STRING	sPassword = "";
+	STRING	sAuthResult = "";
+	INT		nNotUsed = 0;
+
+	hAuthForm = FormNew("@(Authenticate credentials)", 55, 7, 256 + 149);
+	FormPosition(nXPos + 15, nYPos + 55, 0);
+	hUsernameField = FormPrompt(1, 0, "@(User Name): " + sUserInfo[nUserIndex][0]);
+	hPasswordField = FormSecurePassword(1, 2, "@(Password): ", sPassword, 38);
+	hStatusField	 = FormPrompt(1, 4, "@(Enter your password to approve this operation).");
+	FormButton(25, 6, "    @(OK)    ", PerformAuthentication, 0);
+	FormButton(38, 6, "  @(Cancel)  ", CancelAuthentication, 0);
+	FormSetInst(hAuthForm, hUsernameField, nUserIndex, "");		// Store the user index number for use by the callback functions.
+	
+	bAuthenticationInProgress = FALSE;
+	FormRead(1);
+	
+	// Wait until we get a result (cancelled, verified or failed).
+	WHILE (sAuthResult = "") DO
+		SleepMS(100);
+		FormGetInst(hAuthForm, hStatusField, nNotUsed, sAuthResult);
+ 	END
+	
+	IF FormActive(hAuthForm) THEN
+		FormDestroy(hAuthForm);
+		hAuthForm = -1;
+	END
+	
+	RETURN sAuthResult;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			PerformAuthentication
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the user clicks 'OK' on the secure password form.
+//			This functions performs the authentication of the user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION PerformAuthentication()
+
+	INT		bAuthenticated	= FALSE;
+	INT		nAuthResult		= 0;
+	INT		nUserIndex		= 0;
+	STRING	sPassword		= "";
+	STRING	sUsername		= "";
+	STRING	sNotUsed		= "";
+	STRING	sErrorMsg		= "";
+
+	bAuthenticationInProgress = TRUE;
+
+	FormGetData(hAuthForm);
+	sPassword = FormGetText(hAuthForm, hPasswordField);
+	
+	FormGetInst(hAuthForm, hUsernameField, nUserIndex, sNotUsed);		// Retrieve the user index number for for this form.
+	sUsername = sUserInfo[nUserIndex][0];
+
+	FormSetText(hAuthForm, hStatusField, "@(Please wait) ...");
+	
+	nAuthResult = UserVerify(sUsername, sPassword);
+	bAuthenticated = (nAuthResult = 0);
+	
+	FormSetText(hAuthForm, hStatusField, "");
+
+	IF (bAuthenticated) THEN
+		FormSetInst(hAuthForm, hStatusField, 0, sVerifySucceeded);
+	ELSE
+		sErrorMsg = "@(Password authentication failed).";
+		
+		// Only show the error code if it is not one of these two known values:
+		// 274 = Invalid Arguments - this is returned when authentication of a Cicode user's credentials fails.
+		// 439 = Authentication Failed - this is returned when authentication of a Windows user's credentials fails.
+		IF (nAuthResult <> 274 AND nAuthResult <> 439) THEN
+			sErrorMsg = sErrorMsg +  "  @(Error): " + IntToStr(nAuthResult);
+		END
+		
+		FormSetInst(hAuthForm, hStatusField, 0, sErrorMsg);	// Notify the parent function of the result.
+	END
+	
+	bAuthenticationInProgress = FALSE;
+	
+	RETURN 0;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			CancelAuthentication
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the 'Cancel' button on the authentication form is clicked.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION CancelAuthentication()
+
+	// Don't allow the cancel button to be clicked if there is an authentication operation in progress.
+	IF (NOT bAuthenticationInProgress) THEN
+		FormSetInst(hAuthForm, hStatusField, 0, sVerifyCancelled);
+	END
+	
+	RETURN 0;
+END

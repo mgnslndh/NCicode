@@ -1,0 +1,2265 @@
+/*
+**	FILE:	Graph.ci
+**
+**	AUTHOR:	Erhan Izmir
+**
+**	DATE:
+**
+**	REVISION	DATE		AUTHOR
+**
+**	Rev 1		August 1996	Greg Symington
+**
+**	NOTES:
+**
+**	This file contains functions for plotting trend data. It is divided
+**	into the following sections.
+**
+**	Section 1: Setup and Misc. Plot Functions
+**	Section 2: Font Functions
+**	Section 3: Pen Functions
+**	Section 4: Pen Data Functions (operations on global data arrays)
+**	Section 5: SPC Data Functions (operations on global data arrays)
+**	Section 6: Trend Plot Functions
+**	Section 7: Component Plot Functions
+**	Section 8: SPC Specific Component Plot Functions
+*/
+
+/************************ Defines *************************/
+
+/* SPC Type Defines */
+
+INT	SPC_TYPE_XUCL	= 1;
+INT	SPC_TYPE_XLCL	= 2;
+INT	SPC_TYPE_RUCL	= 3;
+INT	SPC_TYPE_RLCL	= 4;
+INT	SPC_TYPE_SUCL	= 5;
+INT	SPC_TYPE_SLCL	= 6;
+INT	SPC_TYPE_MEAN	= 7;
+INT	SPC_TYPE_RANGE	= 8;
+INT	SPC_TYPE_STDDEV	= 9;
+INT	SPC_TYPE_LSL	= 10;
+INT	SPC_TYPE_USL	= 11;
+
+/* Printer Info Defines */
+
+INT 	HORZPIXELS     = 0;
+INT 	VERTPIXELS     = 1;
+INT     INCHHORZPIXELS = 2;
+INT     INCHVERTPIXELS = 3;
+INT 	HORZRES        = 4;
+INT 	VERTRES        = 5;
+INT     FONTCHARHEIGHT = 6;
+INT     FONTEXTLEADING = 7;
+INT     FONTCHARWIDTH  = 8;
+INT     FONTROTATE     = 9;
+INT     FONTSUPPORT    = 10;
+
+/* Text Orientation Defines */
+
+INT     LEFTTORIGHT    = 0;
+INT     UPWARDS        = 1;
+INT     RIGHTTOLEFT    = 2;
+INT     DOWNWARDS      = 3;
+
+/* Plot Line Modes */
+
+INT     BOTTOM_LEFT_CORNER      = 1;
+INT     BOTTOM_RIGHT_CORNER     = 2;
+INT     TOP_LEFT_CORNER         = 4;
+INT     TOP_RIGHT_CORNER        = 8;
+INT	MODE_TREND_DATA		= 32;
+
+/* Drawing Pen Styles Defines */
+
+INT     PEN_SOLID        = 0;
+INT     PEN_DASH         = 1;
+INT     PEN_DOT          = 2;
+INT     PEN_DASH_DOT     = 3;
+INT     PEN_DASH_DOT_DOT = 4;
+INT     PEN_HOLLOW       = 5;
+
+/* Marker Styles Defines */ 	
+
+INT	NOMARKERS        = 0;
+INT     TRIANGLE         = 1;
+INT     SQUARE           = 2;
+INT     CIRCLE           = 3;
+INT     DIAMOND          = 4;
+INT     FILLED_TRIANGLE  = 5;
+INT     FILLED_SQUARE    = 6;
+INT     FILLED_CIRCLE    = 7;
+INT     FILLED_DIAMOND   = 8;
+
+/* Draw Primitives */
+
+INT     DRAW_SQUARE     = 1;
+INT     DRAW_CIRCLE     = 2;
+INT     DRAW_LINE       = 3;
+INT     DRAW_POINT      = 4;
+
+/* Plot Type Defines */
+
+INT     PLOT_TYPE_NORMAL = -1;
+INT     PLOT_TYPE_MEAN	 = 0;
+INT     PLOT_TYPE_RANGE	 = 1;
+INT     PLOT_TYPE_STDDEV = 2;
+INT     PLOT_TYPE_COMPARE= 5;
+
+
+/* SPC Table Type Defines */
+
+INT     SPC_TBL_MEAN 	= 1;
+INT     SPC_TBL_RANGE 	= 2;
+INT     SPC_TBL_STDDEV 	= 4;
+
+
+/* Genaral Defines */
+
+INT HORZGRIDS			= 4;
+INT VERTGRIDS			= 8;
+INT	PRINT_MODE_B_AND_W	= 0;
+INT	PRINT_MODE_COLOUR	= 1;
+
+INT	TREND_TYPE_PERIODIC = 1;
+INT	TREND_TYPE_EVENT    = 2;
+
+INT	MAX_COMPARE_PENS    = 4;
+
+INT	SPC_EVENT_TYPE      = 0;
+INT	TRN_EVENT_TYPE      = 1;
+
+/* Error Defines */
+
+INT     ERROR_FONT_DOES_NOT_EXIST = 321;
+INT     ERROR_INVALID_ARGUMENT	  = 274;
+
+/* Font Defines */
+
+INT	FONT_SMALL	= 0;
+INT	FONT_NORMAL	= 1;
+INT	FONT_BIG	= 2;
+INT	FONT_SCALE	= 3;
+
+/* Text Length Defines */
+
+INT	TEXT_LENGTH_TREND_NAME_LANDSCAPE	= 72;
+INT	TEXT_LENGTH_COMMENT_LANDSCAPE		= 43;
+INT	TEXT_LENGTH_TREND_NAME_PORTRAIT		= 37;
+INT	TEXT_LENGTH_COMMENT_PORTRAIT		= 23;
+INT	TEXT_LENGTH_MIN_SCALE	= 15;
+INT	TEXT_LENGTH_MAX_SCALE	= 15;
+INT	TEXT_LENGTH_ENG_UNITS	= 13;
+INT	TEXT_LENGTH_MIN		= 11;
+INT	TEXT_LENGTH_MAX		= 11;
+INT	TEXT_LENGTH_AVG		= 11;
+INT	TEXT_LENGTH_LEGEND_TOT	= 135;
+INT TEXT_LENGTH_LEGEND	= 13;
+
+INT	TEXT_LEN_SPC_NAME	= 25;
+INT	TEXT_LEN_SPC_VALUE	= 14;
+INT	TEXT_LEN_SPC_LSL	= 14;
+INT	TEXT_LEN_SPC_USL	= 14;
+INT	TEXT_LEN_SPC_LCL	= 14;
+INT	TEXT_LEN_SPC_UCL	= 14;
+
+INT	TEXT_LEN_SPC_MIN	= 14;
+INT	TEXT_LEN_SPC_MAX	= 14;
+
+INT	TEXT_LEN_SPC_MIN_SCALE	= 14;
+INT	TEXT_LEN_SPC_MAX_SCALE	= 14;
+
+INT	TEXT_LEN_SPC_LEGEND	= 150;
+
+INT	TEXT_LENGTH_END_TIME	= 28;
+INT	TEXT_LENGTH_PERIOD	= 14;
+
+INT	TEXT_LENGTH_CMP_LEGEND	= 135;
+
+/* Trend Display Mode Defines */
+
+INT	TRN_DISPLAY_MODE_ORDER = 2;		// order newest to oldest
+INT TRN_DISPLAY_MODE_CONDENSE = 0;	// use mean of samples
+INT	TRN_DISPLAY_MODE_STRETCH = 256;	// use raw samples
+
+
+/******************** Global Variables ********************/
+
+/* Plot Data */
+
+REAL    xPage;		/* horizontal pixels on page 	*/
+REAL    yPage;		/* vertical pixels on page	*/
+INT	yRes;		/* vertical pixels per inch	*/
+INT     dy;		/* 1% of page grid		*/
+INT     dx;		/* 1.5% of page grid		*/
+INT     multiplier;	/* space between scale markers	*/
+REAL    LeftMargin;	/* space allowed for scale markers*/
+REAL    RiteMargin;	/* space allowed for scale markers*/
+INT	nEvents;	/* unscaled number of samples	*/
+
+/* Misc. Data */
+
+INT     LineStyle[8];
+INT     LineColour[8];
+INT     MarkerStyle[8];
+
+/* Font Data */
+
+INT     FontHandle[4];
+INT     FontWidth[4];
+INT		FontHeight[4];
+INT     ScaleOrient;
+
+/* Pen Data */
+
+INT	TrendType;
+REAL	EngBuf[1000];
+INT	TimeBuf[1000];
+REAL	PenMinBuf[8];
+REAL	PenMaxBuf[8];
+REAL	PenAvgBuf[8];
+
+/* Tag Data */
+
+INT     nPens;
+STRING  sPen[8];
+REAL	LoScale[8];
+REAL	HiScale[8];
+
+/* SPC Data */
+
+REAL	SPCBuf[3];
+REAL	SPCMinBuf[3];
+REAL	SPCMaxBuf[3];
+REAL	SPCLoScale[3];
+REAL	SPCHiScale[3];
+
+REAL	LSLBuf[3];
+REAL	USLBuf[3];
+REAL	LCLBuf[3];
+REAL	UCLBuf[3];
+
+/************************************************************************/
+/*									*/
+/*		Setup & Misc Plot Functions				*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltTrendTypeGet
+**		_PltTrendTypeSet
+**
+**		_PltLineStyleGet
+**		_PltMarkerStyleGet
+**		_PltLineColourGet
+**
+**		_PltLineStyleSet
+**		_PltMarkerStyleSet
+**		_PltLineColourSet
+**
+**		_PltInit
+**			_PltPageInit
+**		_PltRealToStr
+**
+*************************************************************************/
+
+INT	FUNCTION _PltTrendTypeGet() RETURN TrendType; END
+	FUNCTION _PltTrendTypeSet(INT hAn) TrendType = _TrendGraphTypeGet(hAn) END
+
+INT	FUNCTION _PltLineStyleGet(INT iPen) RETURN LineStyle[iPen]; END
+INT	FUNCTION _PltMarkerStyleGet(INT iPen) RETURN MarkerStyle[iPen]; END
+INT	FUNCTION _PltLineColourGet(INT iPen) RETURN LineColour[iPen]; END
+
+
+/*
+**	FUNCTION NAME:	_PltLineStyleSet
+**
+**	Defines an array of line styles which can be used
+**	for black and white plots.
+*/
+
+FUNCTION
+_PltLineStyleSet()
+
+	LineStyle[0] = PEN_SOLID;
+	LineStyle[1] = PEN_DASH;
+	LineStyle[2] = PEN_DASH_DOT;
+	LineStyle[3] = PEN_DASH_DOT_DOT;
+	LineStyle[4] = PEN_SOLID;
+	LineStyle[5] = PEN_DASH;
+	LineStyle[6] = PEN_DASH_DOT;
+	LineStyle[7] = PEN_DASH_DOT_DOT;
+
+END
+
+
+/*
+**	FUNCTION NAME:	_PltMarkerStyleSet
+**
+**	Defines an array of marker styles which can be used
+**	for black and white plots.
+*/
+
+FUNCTION
+_PltMarkerStyleSet()
+
+	MarkerStyle[0] = TRIANGLE;
+	MarkerStyle[1] = SQUARE;
+	MarkerStyle[2] = CIRCLE;
+	MarkerStyle[3] = DIAMOND;
+	MarkerStyle[4] = FILLED_TRIANGLE;
+	MarkerStyle[5] = FILLED_SQUARE;
+	MarkerStyle[6] = FILLED_CIRCLE;
+	MarkerStyle[7] = FILLED_DIAMOND;
+
+END
+
+
+/*
+**	FUNCTION NAME:	_PltLineColourSet
+**
+**	Defines an array of line colours which can be used
+**	for colour plots.
+*/
+
+FUNCTION
+_PltLineColourSet()
+
+	LineColour[0] = LIGHT_GREEN;
+	LineColour[1] = BROWN;
+	LineColour[2] = RED;
+	LineColour[3] = LIGHT_BLUE;
+	LineColour[4] = LIGHT_MAGENTA;
+	LineColour[5] = BLACK;
+	LineColour[6] = BLUE;
+	LineColour[7] = DARK_GREY;
+
+END
+
+
+/*
+**	FUNCTION NAME:	_PltInit
+**
+**	Sets up all global data variables.
+*/
+
+INT
+FUNCTION
+_PltInit(INT hPlot, INT hAn)
+
+        INT error = 0;
+        
+	_PltLineStyleSet();
+	_PltMarkerStyleSet();
+	_PltLineColourSet();
+
+	error = _PltPageInit(hPlot, hAn);
+	IF error = 0 THEN
+		error = _PltFontInit(hPlot, yRes);
+	END
+
+	RETURN error;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltPageInit
+**
+**	Sets up global plot variables.
+*/
+
+
+INT
+FUNCTION
+_PltPageInit(INT hPlot, INT hAn)
+
+	multiplier	= 2;
+	xPage		= PlotInfo(hPlot,HORZPIXELS, "");
+	yPage		= PlotInfo(hPlot,VERTPIXELS, "");
+	yRes		= PlotInfo(hPlot,VERTRES, "");
+
+	/* TrnPlot can be called to print a Trend's data when we aren't even
+	   displaying a Trend page. For this situation hAn is set to zero, and we
+	   get the type from the first pen rather than the displayed page. */
+	IF hAn = 0 THEN
+		TrendType = StrToInt(TrnInfo(sPen[0], 1));
+	ELSE	
+		_PltTrendTypeSet(hAn);
+	END
+
+	IF xPage > 0.0 AND yPage > 0.0 THEN 
+
+		dy			= yPage * 0.015;
+		dx			= xPage * 0.01;
+	        LeftMargin = 0.15;
+	        RiteMargin = 0.85;
+
+		IF _PltPensNumberGet() > 2 THEN
+	                LeftMargin = 0.20;
+                        RiteMargin = 0.80;
+		END
+	ELSE
+		RETURN 1;
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltRealToStr
+**
+**	Converts a real value to a string with 4 significant
+**	figures.
+*/
+
+STRING
+FUNCTION
+_PltRealToStr(REAL Value)
+
+	INT	iDecPoint = 1;
+	INT	iDigit = 0;
+	STRING	sValue;
+	REAL	Temp;
+
+	IF TrnIsValidValue(Value) <> 0 THEN
+		RETURN "@(n/a)";
+	END
+
+	Temp = Abs(Value);
+	WHILE Temp > 9 DO
+		Temp = Temp / 10;		
+		iDecPoint = iDecPoint + 1;
+	END
+	IF iDecPoint < 5 THEN
+		iDigit = 4 - iDecPoint;
+	END
+	
+	sValue = RealToStr(Value, 10, iDigit);
+
+	RETURN StrTrim(sValue);
+END
+
+
+/************************************************************************/
+/*									*/
+/*		Font Functions						*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltFontHandleGet
+**		_PltFontWidthGet
+**		_PltFontInit
+**
+*************************************************************************/
+
+INT	FUNCTION _PltFontHandleGet(INT iFont) RETURN FontHandle[iFont]; END
+INT	FUNCTION _PltFontWidthGet(INT iFont) RETURN FontWidth[iFont]; END
+INT	FUNCTION _PltFontHeightGet(INT iFont) RETURN FontHeight[iFont]; END
+
+/*
+**	FUNCTION NAME:	_PltFontInit
+**
+**	DESCRIPTION:	This function creates fonts and prepares the font
+**			list according to the y-resolution of the printer
+**
+**	PSEUDO CODE:
+**
+**		BEGIN
+**			get the font sizes for the given resolution
+**			create a small font
+**			create a big font
+**			create a normal font
+**	
+**			IF the printer does not support those fonts THEN
+**				use the system font for them
+**			END
+**
+**			IF the printer has the font rotate capability THEN
+**				use normal fonts in upward direction
+**			ELSE
+**				use small fonts in lefttoright direction
+**			END
+**		END
+**
+*/
+
+INT
+FUNCTION
+_PltFontInit(INT hPlot, INT yResolution)
+
+	INT	SizeFontSmall  = 28;
+	INT	SizeFontBig    = 60;
+	INT	SizeFontNormal = 32;
+	INT     bTextRotate;
+	INT	error;
+	REAL	ResMultiplier;
+
+	ResMultiplier = IntToReal(yResolution) / 300.0;
+ 
+	SizeFontSmall   = SizeFontSmall * ResMultiplier;
+	SizeFontBig	= SizeFontBig * ResMultiplier;
+	SizeFontNormal	= SizeFontNormal * ResMultiplier;
+
+	FontHandle[FONT_NORMAL] = DspFont("Arial",SizeFontNormal,BLACK,TRANSPARENT);
+        IF FontHandle[FONT_NORMAL] = BAD_HANDLE THEN
+	        error = ERROR_FONT_DOES_NOT_EXIST;
+	        ErrTrap(error,0);
+	        return error;
+        END
+		
+	FontHandle[FONT_BIG] = DspFont("Arial",SizeFontBig,BLACK,TRANSPARENT);
+        IF FontHandle[FONT_BIG] = BAD_HANDLE THEN
+	        error = ERROR_FONT_DOES_NOT_EXIST;
+	        ErrTrap(error,0);
+	        return error;
+        END
+		
+	FontHandle[FONT_SMALL] = DspFont("Arial",SizeFontSmall,BLACK,TRANSPARENT);
+        IF FontHandle[FONT_SMALL] = BAD_HANDLE THEN
+	        error = ERROR_FONT_DOES_NOT_EXIST;
+	        ErrTrap(error,0);
+	        return error;
+        END
+
+	IF PlotInfo(hPlot,FONTSUPPORT, IntToStr(FontHandle[FONT_NORMAL])) = "0" THEN
+		FontHandle[FONT_NORMAL] = 0;
+	END
+
+	IF PlotInfo(hPlot,FONTSUPPORT,IntToStr(FontHandle[FONT_BIG])) = "0" THEN
+		FontHandle[FONT_BIG] = FontHandle[FONT_NORMAL];
+	END
+
+        IF yResolution < 300 THEN
+		FontHandle[FONT_SMALL] = FontHandle[FONT_NORMAL];
+	ELSE IF PlotInfo(hPlot,FONTSUPPORT,IntToStr(FontHandle[FONT_SMALL])) = "0" THEN
+		FontHandle[FONT_SMALL] = FontHandle[FONT_NORMAL];
+	END END
+
+	bTextRotate = PlotInfo(hPlot,FONTROTATE, "");
+	error = IsError();
+	IF bTextRotate > 0 THEN
+		FontHandle[FONT_SCALE] = FontHandle[FONT_NORMAL];
+                ScaleOrient = UPWARDS;
+	ELSE
+		FontHandle[FONT_SCALE] = FontHandle[FONT_SMALL];
+                ScaleOrient = LEFTTORIGHT;
+	END
+
+	FontWidth[FONT_NORMAL]	= PlotInfo(hPlot,FONTCHARWIDTH,IntToStr(FontHandle[FONT_NORMAL]));
+	FontWidth[FONT_SMALL]	= PlotInfo(hPlot,FONTCHARWIDTH,IntToStr(FontHandle[FONT_SMALL]));
+	FontWidth[FONT_SCALE]	= PlotInfo(hPlot,FONTCHARWIDTH,IntToStr(FontHandle[FONT_SCALE]));
+	FontWidth[FONT_BIG]		= PlotInfo(hPlot,FONTCHARWIDTH,IntToStr(FontHandle[FONT_BIG]));
+
+	FontHeight[FONT_NORMAL]	= PlotInfo(hPlot,FONTCHARHEIGHT,IntToStr(FontHandle[FONT_NORMAL]));
+	FontHeight[FONT_SMALL]	= PlotInfo(hPlot,FONTCHARHEIGHT,IntToStr(FontHandle[FONT_SMALL]));
+	FontHeight[FONT_SCALE]	= PlotInfo(hPlot,FONTCHARHEIGHT,IntToStr(FontHandle[FONT_SCALE]));
+	FontHeight[FONT_BIG]	= PlotInfo(hPlot,FONTCHARHEIGHT,IntToStr(FontHandle[FONT_BIG]));
+		
+	return error;
+END
+
+
+/************************************************************************/
+/*									*/
+/*		Pen Functions						*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltPenLoScaleGet
+**		_PltPenHiScaleGet
+**		_PltPenIsEnabled
+**		_PltPenDisable
+**		_PltPensNumberGet
+**		_PltPenNameGet
+**		_PltPenNameSet
+**		_PltPenScaleSetAll
+**			_PltPenScaleSet
+**
+*************************************************************************/
+
+REAL	FUNCTION _PltPenLoScaleGet(INT iPenNo)	RETURN LoScale[iPenNo]; END
+REAL	FUNCTION _PltPenHiScaleGet(INT iPenNo)	RETURN HiScale[iPenNo]; END
+
+INT	FUNCTION _PltPenIsEnabled(INT iPenNo) 	RETURN NOT (sPen[iPenNo] = ""); END
+	FUNCTION _PltPenDisable(INT iPenNo)	sPen[iPenNo] = ""; END
+
+INT	FUNCTION _PltPensNumberGet()		RETURN nPens; END
+	FUNCTION _PltPensNumberSet(INT NoPens)	nPens = NoPens; END
+
+STRING	FUNCTION _PltPenNameGet(INT iPenNo)	RETURN sPen[iPenNo]; END
+
+
+/*
+**	FUNCTION NAME:	_PltPenNameSet
+**
+**	This function sets up the provided pen names
+**	in the sPen[] array. It also sets the number
+**	of pens.
+**
+**	NOTE: The first tag ie. Tag1 MUST always contain
+**		a valid pen name for some of the other
+**		plot functions to work.
+*/
+
+FUNCTION
+_PltPensSet(	STRING Tag1 = "", STRING Tag2 = "", STRING Tag3 = "", STRING Tag4 = "",
+		STRING Tag5 = "", STRING Tag6 = "", STRING Tag7 = "", STRING Tag8 = "")
+
+	INT	iPen;
+
+	sPen[0] = Tag1;
+	sPen[1] = Tag2;
+	sPen[2] = Tag3;
+	sPen[3] = Tag4;
+	sPen[4] = Tag5;
+	sPen[5] = Tag6;
+	sPen[6] = Tag7;
+	sPen[7] = Tag8;
+
+	nPens = 0;
+        FOR iPen = 0 TO 7  DO
+	        IF sPen[iPen] <> "" THEN
+                        nPens = nPens + 1;
+	        END
+        END
+END
+
+
+/*
+**	FUNCTION NAME:	_PltPenScaleSetAll
+**
+**	This function sets up the Hi and Lo scale values for the
+**	pens to be used by the plot functions. If no scales are 
+**	provided then the default scales will be used.
+*/
+
+INT
+FUNCTION
+_PltPenScaleSetAll(	STRING LoScale1 = "", STRING HiScale1 = "", 
+			STRING LoScale2 = "", STRING HiScale2 = "", 
+			STRING LoScale3 = "", STRING HiScale3 = "", 
+			STRING LoScale4 = "", STRING HiScale4 = "",
+			STRING LoScale5 = "", STRING HiScale5 = "",
+			STRING LoScale6 = "", STRING HiScale6 = "",
+			STRING LoScale7 = "", STRING HiScale7 = "",
+			STRING LoScale8 = "", STRING HiScale8 = "")
+
+	INT error = 0;
+
+	error = error + _PltPenScaleSet(0, LoScale1, HiScale1);
+	error = error + _PltPenScaleSet(1, LoScale2, HiScale2);
+	error = error + _PltPenScaleSet(2, LoScale3, HiScale3);
+	error = error + _PltPenScaleSet(3, LoScale4, HiScale4);
+	error = error + _PltPenScaleSet(4, LoScale5, HiScale5);
+	error = error + _PltPenScaleSet(5, LoScale6, HiScale6);
+	error = error + _PltPenScaleSet(6, LoScale7, HiScale7);
+	error = error + _PltPenScaleSet(7, LoScale8, HiScale8);
+
+	RETURN error;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltPenScaleSet
+**
+**	Checks that valid scales have been provided, if not 
+**	then the default scales are used.
+*/
+
+REAL DefLoScale;
+REAL DefHiScale;
+
+INT
+FUNCTION
+_PltPenScaleSet(INT iPen, STRING sLoScale, STRING sHiScale)
+
+	STRING sTag;
+
+	sTag = _PltPenNameGet(iPen);
+
+	IF _PltPenIsEnabled(iPen) THEN
+		IF sLoScale = "" OR sHiScale = "" THEN
+			sTag = _PltPenNameGet(iPen);
+
+			IF TrnGetDefScale(sTag, DefLoScale, DefHiScale) <> 0 THEN
+				RETURN 1;
+			END
+
+			LoScale[iPen] = DefLoScale;
+			HiScale[iPen] = DefHiScale;
+		ELSE
+			LoScale[iPen] = StrToReal(sLoScale);
+			HiScale[iPen] = StrToReal(sHiScale);
+		END
+	END
+
+	RETURN 0;
+END
+
+
+/************************************************************************/
+/*									*/
+/*		Pen Data Functions					*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltPenDataSet
+**		_PltPenMinGet
+**		_PltPenMaxGet
+**		_PltPenAvgGet
+**
+**	NOTES:
+**		These functions report on data set in the _PltPen function.
+**		All pen data array buffers are set only in this function
+**		to avoid confusion. 
+**
+*************************************************************************/
+
+REAL	FUNCTION _PltPenMinGet(INT iPenNo) RETURN PenMinBuf[iPenNo]; END
+REAL	FUNCTION _PltPenMaxGet(INT iPenNo) RETURN PenMaxBuf[iPenNo]; END
+REAL	FUNCTION _PltPenAvgGet(INT iPenNo) RETURN PenAvgBuf[iPenNo]; END
+
+
+/*
+**	FUNCTION NAME:	_PltPenDataSet
+**
+**	Sets the pen data in EngBuf, TimeBuf and other statistical
+**	storage buffers.
+*/
+
+/*
+** Default display mode is 0 + 0 + 256 = 256
+**
+** From the help this is equivalent to...
+** Order returned trend samples from oldest to newest (0)
+** Set the condense method to use the mean of the samples (0)
+** Set the stretch method to use raw samples (256)
+*/
+INT TRN_DISPLAY_MODE_DEFAULT = 256; 
+
+INT
+FUNCTION
+_PltPenDataSet(INT iPen, INT time, REAL period, INT nSamples, INT Type, INT hAn)
+
+	INT	error;
+	STRING	sTag;
+	REAL	EventPeriod;
+	INT	ret;
+	INT	i;
+	INT	iScaledSamples;
+	INT	iDisplayMode;
+	INT iPenNoOnPage;
+
+	sTag = _PltPenNameGet(iPen);
+
+	IsError();
+	ErrSet(1);
+	IF Type = PLOT_TYPE_NORMAL OR Type = PLOT_TYPE_COMPARE THEN
+		IF _PltTrendTypeGet() = TREND_TYPE_EVENT THEN
+			EventPeriod = TrnInfo(sTag, 2);
+			EventPeriod = period / EventPeriod;
+	
+			ret = TrnEventGetTable(sTag, time, period, nSamples, EngBuf, TimeBuf, 1);
+			IF (ret = 0) THEN
+				RETURN IsError();
+			ELSE
+				nSamples = ret;
+			END
+		ELSE
+			iPenNoOnPage = _TrendHnd2PenNo(iPen);
+			IF hAn = 0 THEN // hAn = 0 when called from a report
+				iDisplayMode = TRN_DISPLAY_MODE_DEFAULT;
+			ELSE
+				iDisplayMode = TrnGetDisplayMode(hAn, iPenNoOnPage + 1);
+			END
+			ret = TrnGetTable(sTag, time, period, nSamples, EngBuf, iDisplayMode BITOR 1)
+			IF (ret = 0) THEN
+				RETURN IsError();
+			ELSE
+				nSamples = ret;
+			END
+		END
+
+		PenMinBuf[iPen] = TableMath(EngBuf, nSamples, 0, 1);
+		PenMaxBuf[iPen] = TableMath(EngBuf, nSamples, 1, 1);
+		PenAvgBuf[iPen] = TableMath(EngBuf, nSamples, 2, 1);
+	ELSE
+		IF Type = PLOT_TYPE_MEAN THEN
+			SPCClientTableGet(sTag, SPC_TBL_MEAN, 0, nSamples, EngBuf, 1);
+			_PltSPCBufSet(PLOT_TYPE_MEAN, SPCLimitGet(TrnPageAnGet(), SPC_TYPE_MEAN));
+		ELSE IF Type = PLOT_TYPE_RANGE THEN
+			SPCClientTableGet(sTag, SPC_TBL_RANGE, 0, nSamples, EngBuf, 1); 
+		ELSE IF Type = PLOT_TYPE_STDDEV THEN
+			SPCClientTableGet(sTag, SPC_TBL_STDDEV, 0, nSamples, EngBuf, 1); 
+		END END END
+
+		_PltSPCMinBufSet(Type, TableMath(EngBuf, nSamples, 0, 1));
+		_PltSPCMaxBufSet(Type, TableMath(EngBuf, nSamples, 1, 1));
+	END
+
+       	ErrSet(0);
+
+	error = IsError();
+
+	IF (error = 302) OR (error = 309) THEN
+		error = 0;
+	END
+
+	RETURN error;
+
+END
+
+
+/************************************************************************/
+/*									*/
+/*		SPC Data Functions					*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltSPCBufSet
+**		_PltSPCBufGet
+**		_PltSPCMinBufSet
+**		_PltSPCMinBufGet
+**		_PltSPCMaxBufSet
+**		_PltSPCMaxBufGet
+**
+**		_PltSPCLoScaleSet
+**		_PltSPCLoScaleGet
+**		_PltSPCHiScaleSet
+**		_PltSPCHiScaleGet
+**
+**		_PltLSLBufSet
+**		_PltLSLBufGet
+**		_PltUSLBufSet
+**		_PltUSLBufGet
+**
+**		_PltLCLBufSet
+**		_PltLCLBufGet
+**		_PltUCLBufSet
+**		_PltUCLBufGet
+**
+**		_PltSPCDataInit
+**
+**	NOTES:
+**		These functions initialise set and report SPC data.
+**
+*************************************************************************/
+
+	FUNCTION _PltSPCBufSet(INT SPCType, REAL Val) SPCBuf[SPCType] = Val; END
+REAL	FUNCTION _PltSPCBufGet(INT SPCType) RETURN SPCBuf[SPCType]; END
+
+	FUNCTION _PltSPCMinBufSet(INT SPCType, REAL Val) SPCMinBuf[SPCType] = Val; END
+REAL	FUNCTION _PltSPCMinBufGet(INT SPCType) RETURN SPCMinBuf[SPCType]; END
+
+	FUNCTION _PltSPCMaxBufSet(INT SPCType, REAL Val) SPCMaxBuf[SPCType] = Val; END
+REAL	FUNCTION _PltSPCMaxBufGet(INT SPCType) RETURN SPCMaxBuf[SPCType]; END
+
+	FUNCTION _PltSPCLoScaleSet(INT SPCType, REAL Val) SPCLoScale[SPCType] = Val; END
+REAL	FUNCTION _PltSPCLoScaleGet(INT SPCType) RETURN SPCLoScale[SPCType]; END
+
+	FUNCTION _PltSPCHiScaleSet(INT SPCType, REAL Val) SPCHiScale[SPCType] = Val; END
+REAL	FUNCTION _PltSPCHiScaleGet(INT SPCType) RETURN SPCHiScale[SPCType]; END
+
+	FUNCTION _PltLSLBufSet(INT SPCType, REAL Val) LSLBuf[SPCType] = Val; END
+REAL	FUNCTION _PltLSLBufGet(INT SPCType) RETURN LSLBuf[SPCType]; END
+
+	FUNCTION _PltUSLBufSet(INT SPCType, REAL Val) USLBuf[SPCType] = Val; END
+REAL	FUNCTION _PltUSLBufGet(INT SPCType) RETURN USLBuf[SPCType]; END
+
+	FUNCTION _PltLCLBufSet(INT SPCType, REAL Val) LCLBuf[SPCType] = Val; END
+REAL	FUNCTION _PltLCLBufGet(INT SPCType) RETURN LCLBuf[SPCType]; END
+
+	FUNCTION _PltUCLBufSet(INT SPCType, REAL Val) UCLBuf[SPCType] = Val; END
+REAL	FUNCTION _PltUCLBufGet(INT SPCType) RETURN UCLBuf[SPCType]; END
+
+
+/*
+**	FUNCTION NAME:	_PltSPCDataInit
+**
+**	Initialises SPC scale and limits data.
+*/
+
+FUNCTION
+_PltSPCDataInit(INT hANTrend, INT Type)
+
+	REAL	LSL;
+	REAL	USL;
+
+	IF Type = PLOT_TYPE_MEAN THEN
+		LSL = SPCLimitGet(hANTrend, SPC_TYPE_LSL);
+		USL = SPCLimitGet(hANTrend, SPC_TYPE_USL);
+		
+		_PltLSLBufSet(Type, LSL);
+		_PltUSLBufSet(Type, USL);
+
+		IF (TrnIsValidValue(LSL) = 0) AND (TrnIsValidValue(USL) = 0) THEN
+			_PltSPCLoScaleSet(Type, LSL - ((USL - LSL) * 0.15));
+			_PltSPCHiScaleSet(Type, USL + ((USL - LSL) * 0.15));
+		ELSE
+			_PltSPCLoScaleSet(Type, TrnGetScale(hANTrend, 4, 0));
+			_PltSPCHiScaleSet(Type, TrnGetScale(hANTrend, 4, 100));
+		END
+	ELSE
+		_PltLSLBufSet(Type, TrnGetInvalidValue());
+		_PltUSLBufSet(Type, TrnGetInvalidValue());
+
+		_PltSPCLoScaleSet(Type, TrnGetScale(hANTrend, 4, 0));
+		_PltSPCHiScaleSet(Type, TrnGetScale(hANTrend, 4, 100));
+	END
+
+	_PltSPCBufSet(Type, SPCLimitGet(hANTrend, Type + 7));
+	_PltLCLBufSet(Type, SPCLimitGet(hANTrend, Type * 2 + 2));
+	_PltUCLBufSet(Type, SPCLimitGet(hANTrend, Type * 2 + 1));
+
+END
+
+/************************************************************************/
+/*									*/
+/*		Trend Plot Function					*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		TrnPlot
+**		SPCPlot
+**		TrnComparePlot
+**
+*************************************************************************/
+
+/*
+**	FUNCTION NAME:	TrnPlot
+**
+**	INVOCATION:	From an operator command anywhere.
+**
+**	Plots a trend to a printer in colour if available or else in
+**	black and white.
+**
+*/
+
+INT
+FUNCTION
+TrnPlot(STRING sPrinter, INT nSamples, INT time1, REAL period1, STRING title, INT hAn,
+        STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "",
+        STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT    Mode = PRINT_MODE_B_AND_W, STRING comment = "",
+	STRING LoScale1 = "", STRING HiScale1 = "",
+	STRING LoScale2 = "", STRING HiScale2 = "",
+	STRING LoScale3 = "", STRING HiScale3 = "",
+	STRING LoScale4 = "", STRING HiScale4 = "",
+	STRING LoScale5 = "", STRING HiScale5 = "",
+	STRING LoScale6 = "", STRING HiScale6 = "",
+	STRING LoScale7 = "", STRING HiScale7 = "",
+	STRING LoScale8 = "", STRING HiScale8 = "")
+	
+	INT		error = 0;
+	INT		hPlot;
+	INT		txtLength;
+	INT 	xTopLeft;
+	INT 	yTopLeft;
+	INT 	xBotRite;
+	INT 	yBotRite;
+	INT		nLandscape = 0;
+
+	IF time1 = 0 THEN
+		time1 = TimeCurrent();
+	END
+
+	IF period1 = 0 THEN
+		period1 = TrnInfo(sTag1, 2);
+	END
+
+	_PltPensSet(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+
+	_PltPenScaleSetAll(	LoScale1, HiScale1,
+				Loscale2, HiScale2,
+				LoScale3, HiScale3,
+				LoScale4, HiScale4,
+				LoScale5, HiScale5,
+				LoScale6, HiScale6,
+				LoScale7, HiScale7,
+				LoScale8, HiScale8);
+
+
+	IF time1 <= 0 OR period1 <= 0 OR nSamples < 2 
+		OR _PltPensNumberGet() <= 0 THEN
+
+		ErrLog("Error in TrnPlot: " +
+				IntToStr(time1) + "  " +
+				RealToStr(period1, 12, 4) + "  " +
+				IntToStr(nSamples) + "  " +
+				sTag1 + " " +
+				sTag2 + " " +
+				sTag3 + " " +
+				sTag4 + " " +
+				sTag5 + " " +
+				sTag6 + " " +
+				sTag7 + " " +
+				sTag8);
+
+		ErrTrap(ERROR_INVALID_ARGUMENT, 0);
+		return ERROR_INVALID_ARGUMENT;
+	END
+
+	hPlot = PlotOpen(-1,sPrinter,1);
+	IF hPlot > BAD_HANDLE THEN
+
+		error = _PltInit(hPlot, hAn);
+                
+		IF error <> 0 THEN
+			return error;
+		END
+
+		IF xPage > yPage THEN
+			nLandscape = 1;
+		END
+		
+/* Plot Border */
+		xTopLeft = xPage * 0.020;
+		xBotRite = xPage * 0.980;
+		yTopLeft = yPage * 0.020;
+		yBotRite = yPage * 0.980;
+
+		_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+
+/* Plot Title */
+		yBotRite	= (yPage * 0.03) + _PltFontHeightGet(FONT_BIG);
+		txtLength	= StrLength(title) * _PltFontWidthGet(FONT_BIG);
+		_PltTitle(hPlot, title, (xTopLeft + xBotRite - txtLength) / 2, yBotRite); 
+
+/* Plot Comment */
+		yBotRite	= yBotRite + (yPage * 0.01) + _PltFontHeightGet(FONT_NORMAL);	
+		txtLength	= StrLength(comment) * _PltFontWidthGet(FONT_NORMAL);
+		_PltComment(hPlot, comment, (xTopLeft + xBotRite - txtLength) / 2, yBotRite); 
+
+/* Plot Trend */
+		xTopLeft = xPage * LeftMargin;
+		xBotRite = xPage * RiteMargin;
+		yTopLeft = yBotRite + (yPage * 0.01);
+		yBotRite = yPage - (yPage * 0.06) - _PltLegendHeight(nLandscape) - (_PltFontHeightGet(FONT_SMALL) * 2);
+		error = _PltTrend(	hPlot, nSamples, time1, period1, 0, 0, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, PLOT_TYPE_NORMAL,
+							TRN_EVENT_TYPE, hAn);
+		
+/* Plot Legend */
+		xTopLeft = xPage * 0.04;
+		xBotRite = xPage * 0.96;
+		yTopLeft = yBotRite + (yPage * 0.02) + (_PltFontHeightGet(FONT_SMALL) * 2);
+		yBotRite = yPage * 0.96;
+		_PltLegend(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, nLandscape);
+					
+		PlotClose(hPlot); 
+	END 
+
+	RETURN error;
+END
+
+
+/*
+**	FUNCTION NAME:	TrnGraph
+**
+**	INVOCATION:	From an operator command anywhere.
+**	
+**	This function has been maintained for backward
+**	compatibility only
+*/
+
+INT
+FUNCTION
+TrnGraph(STRING sPrinter, INT nSamples, INT time, REAL period, STRING title,
+         STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "",
+         STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "")
+
+INT	error;
+        
+	error = TrnPlot(sPrinter, nSamples, time, period, title, 0, sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8, PRINT_MODE_B_AND_W);
+	
+        RETURN error;
+END
+
+
+/*
+**	FUNCTION NAME:	SPCPlot
+**
+**	INVOCATION:	From an operator command on an SPC page.
+**
+**	Plots an SPC trend to a printer in colour if available or else in
+**	black and white. The plot shows 3 graphs, Mean, Range and Std.Dev.
+**
+*/
+
+INT
+FUNCTION
+SPCPlot(STRING sPrinter, INT hAn, STRING title = "", STRING comment = "",
+			INT Mode = PRINT_MODE_B_AND_W)
+	
+	INT     error = 0;
+
+        INT     hPlot;
+	INT	nSamples;
+
+	INT     txtLength;
+	INT	LegendLength;
+
+	INT 	xTopLeft;
+	INT 	yTopLeft;
+	INT 	xBotRite;
+	INT 	yBotRite;
+
+	INT	time;
+	REAL	period;
+
+
+	_PltPensNumberSet(1);
+	_PltPensSet(TrnGetPen(TrnPageAnGet(), 4));
+
+	hPlot = PlotOpen(-1,sPrinter,1);
+	IF hPlot > BAD_HANDLE THEN
+
+		error = _PltInit(hPlot, hAn);
+                
+		nSamples = SPCClientInfo(TrnGetPen(TrnPageAnGet(), 4), 2);
+		time = TrnGetTime(hAn, 1, 0);
+		period = TrnGetPeriod(hAn);
+
+		IF error <> 0 THEN
+			ErrLog("Error in SPCPlot: ");
+			return error;
+		END
+
+/* Plot Border */
+		xTopLeft = xPage * 0.020;
+		xBotRite = xPage * 0.980;
+		yTopLeft = yPage * 0.020;
+		yBotRite = yPage * 0.980;
+
+		_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+
+/* Plot Title */		
+		txtLength = StrLength(title) * _PltFontWidthGet(FONT_BIG);
+		_PltTitle(hPlot, title, (xTopLeft + xBotRite - txtLength) / 2, yPage * 0.08); 
+
+/* Plot Comment */		
+		txtLength = StrLength(comment) * _PltFontWidthGet(FONT_NORMAL);
+		_PltComment(hPlot, comment, (xTopLeft + xBotRite - txtLength) / 2, yPage * 0.10); 
+
+/* Plot Mean */
+		_PltSPCDataInit(TrnPageAnGet(), PLOT_TYPE_MEAN);
+
+		xTopLeft = xPage * LeftMargin;
+		xBotRite = xPage * RiteMargin;
+		yTopLeft = yPage * 0.13;
+		yBotRite = yPage * 0.33;
+
+		_PltPenScaleSetAll(_PltSPCLoScaleGet(PLOT_TYPE_MEAN), _PltSPCHiScaleGet(PLOT_TYPE_MEAN));
+
+		error = _PltTrend(hPlot, nSamples, time, period, 0, 0, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, PLOT_TYPE_MEAN, SPC_EVENT_TYPE, hAn);
+
+/* Plot Range */
+		xTopLeft = xPage * LeftMargin;
+		xBotRite = xPage * RiteMargin;
+		yTopLeft = yPage * 0.35;
+		yBotRite = yPage * 0.55;
+
+		_PltSPCDataInit(TrnPageAnGet()+1, PLOT_TYPE_RANGE);
+		_PltPenScaleSetAll(_PltSPCLoScaleGet(PLOT_TYPE_RANGE), _PltSPCHiScaleGet(PLOT_TYPE_RANGE));
+
+		error = _PltTrend(hPlot, nSamples, time, period, 0, 0, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, PLOT_TYPE_RANGE, SPC_EVENT_TYPE, hAn);
+
+/* Plot StdDev */
+		xTopLeft = xPage * LeftMargin;
+		xBotRite = xPage * RiteMargin;
+		yTopLeft = yPage * 0.57;
+		yBotRite = yPage * 0.77;
+
+		_PltSPCDataInit(TrnPageAnGet()+2, PLOT_TYPE_STDDEV);
+		_PltPenScaleSetAll(_PltSPCLoScaleGet(PLOT_TYPE_STDDEV), _PltSPCHiScaleGet(PLOT_TYPE_STDDEV));
+
+		error = _PltTrend(hPlot, nSamples, time, period, 0, 0, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, PLOT_TYPE_STDDEV, SPC_EVENT_TYPE, hAn);
+		
+/* Plot Legend */
+		LegendLength = (dx * 2) + (TEXT_LEN_SPC_LEGEND * _PltFontWidthGet(FONT_NORMAL)) + (dx * 2);
+		xTopLeft = xPage / 2 - LegendLength / 2;
+		xBotRite = xPage / 2 + LegendLength / 2;
+		yTopLeft = yPage * 0.84;
+		yBotRite = yTopLeft + (dy * (5.75 + 3 - 1));
+
+		_PltSPCLegend(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode);
+            
+		PlotClose(hPlot); 
+	END 
+
+	RETURN error;
+END
+
+/*
+**	FUNCTION NAME:	TrnComparePlot
+**
+**	INVOCATION:	From an operator command anywhere.
+**
+**	Plots a comparison between two trends at different times
+**	to a printer in colour if available or else in
+**	black and white. The first 4 tags must come from 
+**	the first trend, the second 4 from the second trend. 
+**
+*/
+
+INT
+FUNCTION
+TrnComparePlot(STRING sPrinter, STRING title, INT hAn, STRING comment, INT Mode, 
+	INT nSamples, INT time1, REAL period1, INT time2, REAL period2,  
+        STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "",
+        STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	 
+	STRING LoScale1 = "", STRING HiScale1 = "",
+	STRING LoScale2 = "", STRING HiScale2 = "",
+	STRING LoScale3 = "", STRING HiScale3 = "",
+	STRING LoScale4 = "", STRING HiScale4 = "",
+	STRING LoScale5 = "", STRING HiScale5 = "",
+	STRING LoScale6 = "", STRING HiScale6 = "",
+	STRING LoScale7 = "", STRING HiScale7 = "",
+	STRING LoScale8 = "", STRING HiScale8 = "")
+	
+	INT     error = 0;
+	INT		hPlot;
+	INT     txtLength;
+	INT 	xTopLeft;
+	INT 	yTopLeft;
+	INT 	xBotRite;
+	INT 	yBotRite;
+	INT		nLandscape = 0;
+
+	IF time1 = 0 THEN
+		time1 = TimeCurrent();
+	END
+
+	IF period1 = 0 THEN
+		period1 = TrnInfo(sTag1, 2);
+	END
+
+	IF time2 = 0 THEN
+		time2 = TimeCurrent();
+	END
+
+	IF period2 = 0 THEN
+		period2 = TrnInfo(sTag4, 2);
+	END
+
+	_PltPensSet(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+
+	_PltPenScaleSetAll(	LoScale1, HiScale1,
+				Loscale2, HiScale2,
+				LoScale3, HiScale3,
+				LoScale4, HiScale4,
+				LoScale5, HiScale5,
+				LoScale6, HiScale6,
+				LoScale7, HiScale7,
+				LoScale8, HiScale8);
+
+
+	IF time1 <= 0 OR period1 <= 0 OR time2 <= 0 OR period2 <= 0 OR nSamples < 2 
+		OR _PltPensNumberGet() <= 0 THEN
+
+		ErrLog("Error in TrnComparePlot: " +
+				IntToStr(time1) + "  " +
+				RealToStr(period1, 12, 4) + "  " +
+				IntToStr(time2) + "  " +
+				RealToStr(period2, 12, 4) + "  " +
+				IntToStr(nSamples) + "  " +
+				sTag1 + " " +
+				sTag2 + " " +
+				sTag3 + " " +
+				sTag4 + " " +
+				sTag5 + " " +
+				sTag6 + " " +
+				sTag7 + " " +
+				sTag8);
+
+		ErrTrap(ERROR_INVALID_ARGUMENT, 0);
+		return ERROR_INVALID_ARGUMENT;
+	END
+
+	hPlot = PlotOpen(-1,sPrinter,1);
+	IF hPlot > BAD_HANDLE THEN
+
+		error = _PltInit(hPlot, hAn);
+                
+		IF error <> 0 THEN
+			return error;
+		END
+
+		IF xPage > yPage THEN
+			nLandscape = 1;
+		END
+		
+/* Plot Border */
+		xTopLeft = xPage * 0.020;
+		xBotRite = xPage * 0.980;
+		yTopLeft = yPage * 0.020;
+		yBotRite = yPage * 0.980;
+
+		_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+
+/* Plot Title */
+		yBotRite	= (yPage * 0.03) + _PltFontHeightGet(FONT_BIG);
+		txtLength	= StrLength(title) * _PltFontWidthGet(FONT_BIG);
+		_PltTitle(hPlot, title, (xTopLeft + xBotRite - txtLength) / 2, yBotRite); 
+
+/* Plot Comment */
+		yBotRite	= yBotRite + (yPage * 0.01) + _PltFontHeightGet(FONT_NORMAL);	
+		txtLength	= StrLength(comment) * _PltFontWidthGet(FONT_NORMAL);
+		_PltComment(hPlot, comment, (xTopLeft + xBotRite - txtLength) / 2, yBotRite); 
+
+/* Plot Trend */
+		xTopLeft = xPage * LeftMargin;
+		xBotRite = xPage * RiteMargin;
+		yTopLeft = yBotRite + (yPage * 0.01);
+		yBotRite = yPage - (yPage * 0.07) - _PltLegendHeight(nLandscape) - (_PltFontHeightGet(FONT_SMALL) * 4);
+		error = _PltTrend(	hPlot, nSamples, time1, period1, time2, period2, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode,
+							PLOT_TYPE_COMPARE, SPC_EVENT_TYPE, hAn);
+							
+/* Plot Legend */
+		xTopLeft = xPage * 0.06;
+		xBotRite = xPage * 0.96;
+		yTopLeft = yBotRite + (yPage * 0.03) + (_PltFontHeightGet(FONT_SMALL) * 4);
+		yBotRite = yPage * 0.96;
+		_PltCmpLegend(hPlot, time1, period1, time2, period2, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, nLandscape);
+
+		PlotClose(hPlot); 
+	END 
+
+	RETURN error;
+END
+
+/************************************************************************/
+/*									*/
+/*		Component Plot Functions				*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltBorder
+**		_PltTitle
+**		_PltComment
+**		_PltTrend
+**			_PltPen
+**			_PltYAxis
+**			_PltXAxis
+**		_PltLegend
+**			_PltLegendText
+**
+*************************************************************************/
+
+
+/*
+**	FUNCTION NAME:	_PltBorder
+**
+**	Plots a rectangle for given coordinates.
+*/
+
+FUNCTION
+_PltBorder(INT hPlot, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite)
+
+	PlotDraw(hPlot,DRAW_SQUARE,PEN_SOLID,BLACK,2,TRANSPARENT,xTopLeft,yTopLeft,xBotRite,yBotRite); 
+END
+
+
+/*
+**	FUNCTION NAME:	_PltTitle
+**
+**	Plots Page title.
+*/
+
+FUNCTION
+_PltTitle(INT hPlot, STRING sText, INT x, INT y)
+
+	PlotText(hPlot,_PltFontHandleGet(FONT_BIG),LEFTTORIGHT,x,y,sText);
+END
+
+
+/*
+**	FUNCTION NAME:	_PltComment
+**
+**	Plots Page comment.
+*/
+
+FUNCTION
+_PltComment(INT hPlot, STRING sText, INT x, INT y)
+
+	PlotText(hPlot,_PltFontHandleGet(FONT_NORMAL),LEFTTORIGHT,x,y,sText);
+END
+
+
+/*
+**	FUNCTION NAME:	_PltTrend
+**
+**	Plots the trend with the axis markers.
+*/
+
+INT
+FUNCTION
+_PltTrend(INT hPlot, INT nSamples, INT time1, REAL period1, INT time2, REAL period2, 
+		INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT Mode, INT Type, INT TrnType, INT hAn);
+
+	INT error;
+	INT iPen;
+		
+	PlotGrid(hPlot,nSamples,xTopLeft, yTopLeft, xBotRite, yBotRite,
+                HORZGRIDS,BLUE,VERTGRIDS,BLUE,5,BLACK,TRANSPARENT,0);
+         
+	FOR iPen = 0 TO 7 DO
+	        IF _PltPenIsEnabled(iPen) THEN
+
+			IF iPen >= 4 AND Type = PLOT_TYPE_COMPARE THEN
+				error = _PltPen(hPlot, iPen, time2, period2, nSamples, Mode, Type, hAn);
+			ELSE
+				error = _PltPen(hPlot, iPen, time1, period1, nSamples, Mode, Type, hAn);
+			END
+
+                       	IF error = 0 THEN
+				error = _PltYAxis(hPlot, iPen, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, Type);
+			ELSE
+               		        _PltPenDisable(iPen);
+	        	END
+	        END
+	END
+		
+        IF error = 0 THEN
+        	IF (Type = PLOT_TYPE_NORMAL OR Type = PLOT_TYPE_STDDEV) THEN
+			error = _PltXAxis(hPlot, time1, period1, nSamples, xTopLeft, yTopLeft, xBotRite, yBotRite, TrnType);
+		ELSE IF Type = PLOT_TYPE_COMPARE THEN
+			error = _PltXAxis(hPlot, time1, period1, nSamples, xTopLeft, yTopLeft, xBotRite, yBotRite, TrnType);
+			error = _PltXAxis(hPlot, time2, period2, nSamples, xTopLeft, yTopLeft, xBotRite, yBotRite+(2*dy), TrnType);
+		END END
+
+		IF Type = PLOT_TYPE_MEAN THEN
+			_PltSPCPens(TrnPageAnGet(), hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, Type);
+		ELSE IF Type = PLOT_TYPE_RANGE THEN
+			_PltSPCPens(TrnPageAnGet()+1, hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, Type);
+		ELSE IF Type = PLOT_TYPE_STDDEV THEN
+			_PltSPCPens(TrnPageAnGet()+2, hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite, Mode, Type);
+		END END END
+        END
+
+	RETURN error;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltPen
+**
+**	Plots a single pen line
+*/
+
+INT
+FUNCTION
+_PltPen(INT hPlot, INT iPen, INT time, REAL period, INT nSamples, INT Mode, INT Type, INT hAn)
+
+	INT	error;
+	REAL	LoScale;
+	REAL	HiScale;
+
+	LoScale = _PltPenLoScaleGet(iPen);
+	HiScale = _PltPenHiScaleGet(iPen);
+
+	error = _PltPenDataSet(iPen, time, period, nSamples, Type, hAn);
+	IF error <> 0 THEN
+		RETURN error;
+	END
+
+	IF Mode = PRINT_MODE_COLOUR THEN
+        	PlotLine(hPlot,PEN_SOLID,_PltLineColourGet(iPen),2,NOMARKERS,BLACK,0,nSamples,EngBuf,
+                	LoScale,HiScale,BOTTOM_RIGHT_CORNER +
+                	MODE_TREND_DATA);
+	ELSE
+		IF Type = PLOT_TYPE_NORMAL OR Type = PLOT_TYPE_COMPARE THEN
+	        	PlotLine(hPlot,_PltLineStyleGet(iPen),_PltLineColourGet(iPen),2,_PltMarkerStyleGet(iPen),BLACK,0,nSamples,EngBuf,
+	                	LoScale,HiScale,BOTTOM_RIGHT_CORNER +
+	                	MODE_TREND_DATA);
+		ELSE
+	        	PlotLine(hPlot,_PltLineStyleGet(iPen),_PltLineColourGet(iPen),2,NOMARKERS,BLACK,0,nSamples,EngBuf,
+	                	LoScale,HiScale,BOTTOM_RIGHT_CORNER +
+	                	MODE_TREND_DATA);
+		END
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltYAxis
+**
+**	Plots the Y-Axis scale markers.
+*/
+
+INT
+FUNCTION
+_PltYAxis(INT hPlot, INT iPen, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT Mode, INT Type)	
+
+	INT	x;
+        INT     xMarker;
+	REAL    dScale;
+	REAL    Scale;
+	INT     dyScale;
+	INT     yScale;
+	INT     i;
+        INT     txtLength;
+
+	REAL	LoScale;
+	REAL	HiScale;
+
+	LoScale = _PltPenLoScaleGet(iPen);
+	HiScale = _PltPenHiScaleGet(iPen);
+
+	IF Type = PLOT_TYPE_COMPARE THEN
+		IF iPen < MAX_COMPARE_PENS THEN
+			xMarker = xTopLeft - (dx * (multiplier + (4 * iPen)));
+        		x = xMarker - (dx * 3.5);
+		ELSE
+			xMarker = xBotRite + (dx * (multiplier + (4 * (iPen - 4))));
+		        x = xMarker + (dx * 0.5);
+        	END
+	ELSE
+		IF (iPen MOD 2) = 0 THEN
+			xMarker = xTopLeft - (dx * multiplier);
+        		x = xMarker - (dx * 3.5);
+		ELSE
+			xMarker = xBotRite + (dx * multiplier);
+        	        multiplier = multiplier + 4;
+		        x = xMarker + (dx * 0.5);
+        	END
+	END
+
+
+	IF Mode = PRINT_MODE_B_AND_W THEN
+        	PlotMarker(hPlot,_PltMarkerStyleGet(iPen),_PltLineColourGet(iPen),1,1,xMarker,yTopLeft - 12);
+        	PlotMarker(hPlot,_PltMarkerStyleGet(iPen),_PltLineColourGet(iPen),1,1,xMarker,(yTopLeft + yBotRite)/2);
+	END
+
+        PlotScaleMarker(hPlot,xMarker,yBotRite,HORZGRIDS+1,2,_PltLineColourGet(iPen),0);
+       	PlotText(hPlot,_PltFontHandleGet(FONT_SMALL),LEFTTORIGHT,x,yTopLeft+4,_PltRealToStr(HiScale)); 
+       	PlotText(hPlot,_PltFontHandleGet(FONT_SMALL),LEFTTORIGHT,x,yBotRite+4,_PltRealToStr(LoScale)); 
+	dScale  = (HiScale - LoScale) / HORZGRIDS;
+        dyScale = (yTopLeft - yBotRite) / HORZGRIDS;
+	yScale  = yBotRite + dyScale + 4;
+	Scale   = LoScale + dScale;
+
+	FOR i = 1 TO (HORZGRIDS - 1) DO
+       		PlotText(hPlot,_PltFontHandleGet(FONT_SMALL),LEFTTORIGHT,x,yScale,_PltRealToStr(Scale)); 
+		Scale  = Scale + dScale;
+		yScale = yScale + dyScale;
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltXAxis
+**
+**	Plots the X-Axis time/date markers.
+*/
+
+INT
+FUNCTION
+_PltXAxis(	INT hPlot, INT time, REAL period, INT nSamples,
+		INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT TrnType)
+		
+	INT	xTime;
+	INT	dxTime;
+	INT     i;
+	INT     j;
+	INT	dTime;
+	STRING  sTime;
+	STRING  sDate;
+        INT     txtLength;
+        INT	nEndTime;
+        INT	EventPeriod;
+	INT	nEvents;
+	INT	hANTrend;
+	INT	nPercent;
+	INT	nDispVal;
+	INT nSGSize;
+	STRING	units;
+
+        nEndTime = time;
+
+	dxTime = (xBotRite - xTopLeft) / VERTGRIDS;
+	IF _PltTrendTypeGet() = TREND_TYPE_EVENT THEN
+		nEvents = PltTrendGetEvents();
+		dTime = nEvents / VERTGRIDS;
+	ELSE
+		IF TrnPageTypeSPCGet() THEN
+			SPCSubgroupSizeGet(TrnGetPen(TrnPageAnGet(), 4), nSGSize);
+		ELSE
+			nSGSize = 0;
+		END
+
+		IF nSGSize = 0 THEN
+        	dTime  = (period * nSamples) / VERTGRIDS;
+		else
+			dTime  = (period * nSamples * nSGSize) / VERTGRIDS;
+        END
+	END
+
+	txtLength = (11 * _PltFontWidthGet(FONT_SMALL)) / 2;
+	xTime = xBotRite - txtLength;
+	
+	IF TrnType = TRN_EVENT_TYPE THEN
+		hANTrend = TrnPageANGet();
+	ELSE
+		hANTrend = TrnPageANGet() + 2;  
+        END
+
+	FOR i = 1 TO (VERTGRIDS + 1) DO
+		IF (i MOD 2) <> 0 THEN
+			IF _PltTrendTypeGet() = TREND_TYPE_EVENT THEN
+				nPercent = ((i - 1)*100)/VERTGRIDS;
+				nDispVal = TrnGetEvent(hANTrend, 0, nPercent);
+				j = 100000000;
+				sTime = "   "
+				WHILE (j >= nDispVal AND j > 0)DO
+					sTime = sTime + " ";
+					j = j / 100;
+				END
+				sTime = sTime + IntToStr(nDispVal);
+		       		PlotText(hPlot,_PltFontHandleGet(FONT_SMALL),LEFTTORIGHT,xTime,yBotRite+dy,sTime);
+		       		
+			ELSE
+				sTime = TimeToStr(Time,1);
+		       		PlotText(hPlot,_PltFontHandleGet(FONT_SMALL),LEFTTORIGHT,xTime,yBotRite+dy,sTime); 
+
+				sDate = TimeToStr(Time,2);
+		       		PlotText(hPlot, _PltFontHandleGet(FONT_SMALL), LEFTTORIGHT,
+		       			xTime + 1.5 * _PltFontWidthGet(FONT_SMALL) ,yBotRite+2*dy, sDate); 
+			END
+		END			
+		xTime = xTime - dxTime;
+                time  = time - dTime;
+	END
+
+	IF _PltTrendTypeGet() = TREND_TYPE_EVENT THEN
+		units = "@(Event Number)";
+		txtLength = StrLength(units) * _PltFontWidthGet(FONT_NORMAL);
+		_PltComment(hPlot, units, (xTopLeft + xBotRite - txtLength) / 2, yBotRite+(3*dy)); 
+	END
+
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_PltLegend
+**
+**	Plots the Legend.
+*/
+
+FUNCTION
+_PltLegend(	INT hPlot, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT Mode, INT nLandscape)
+
+	INT		x;
+	INT		y;
+	INT		xLeftSample;
+	INT		xRiteSample;
+	INT		xMidSample;
+	INT		iPen;
+	INT		nNameLength		= TEXT_LENGTH_TREND_NAME_PORTRAIT;
+	INT		nCommentLength	= TEXT_LENGTH_COMMENT_PORTRAIT;
+
+	IF nLandscape = 1 THEN
+		nNameLength		= TEXT_LENGTH_TREND_NAME_LANDSCAPE;
+		nCommentLength	= TEXT_LENGTH_COMMENT_LANDSCAPE;
+	END
+
+/* Plot Border */
+	_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+	
+/* Plot Legend Titles */        
+	y = yTopLeft + _PltFontHeightGet(FONT_NORMAL) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+	x = xTopLeft + (xPage * 0.01);
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Legend)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_LEGEND;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Trend Name)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * nNameLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Comment)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * nCommentLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Min.)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Max.)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MAX;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Avg.)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_AVG;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Min. Scale)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN_SCALE;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Max. Scale)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_ENG_UNITS;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Eng. Units)");
+	
+	y = y + _PltFontHeightGet(FONT_NORMAL) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+	xLeftSample = xTopLeft + (xPage * 0.01);
+	xRiteSample = xLeftSample + (_PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_LEGEND) - (xPage * 0.01);
+	xMidSample  = (xLeftSample + xRiteSample) / 2;
+
+/* Plot Samples */
+	FOR iPen = 0 TO 7 DO
+		IF _PltPenIsEnabled(iPen) THEN
+			IF Mode = PRINT_MODE_COLOUR THEN
+				PlotDraw(hPlot,DRAW_LINE,PEN_SOLID,_PltLineColourGet(iPen),2,TRANSPARENT,xLeftSample,y,xRiteSample,y + 1);
+			ELSE
+				PlotDraw(hPlot,DRAW_LINE,_PltLineStyleGet(iPen),_PltLineColourGet(iPen),1,TRANSPARENT,xLeftSample,y,xRiteSample,y + 1);
+				PlotMarker(hPlot,_PltMarkerStyleGet(iPen),_PltLineColourGet(iPen),1,1,xMidSample,y);
+			END
+			y = y + (_PltLegendText(hPlot, xRiteSample + (xPage * 0.01), y, iPen, nNameLength, nCommentLength) * _PltFontHeightGet(FONT_NORMAL)) +
+				((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+		END
+	END
+END
+
+/*
+**	FUNCTION NAME:	_PltLegendHeight
+**
+**	Calculates the height that the legend will be.
+*/
+
+INT
+FUNCTION
+_PltLegendHeight(INT nLandscape)
+
+	INT	iPen;
+	INT	nLegendHeight		= (_PltFontHeightGet(FONT_NORMAL) * 5) / 2;
+	INT nNameLength			= TEXT_LENGTH_TREND_NAME_PORTRAIT;
+	INT nCommentLength		= TEXT_LENGTH_COMMENT_PORTRAIT;
+	INT	nNameLines			= 0;
+	INT	nCommentLines		= 0;
+	
+	IF nLandscape = 1 THEN
+		nNameLength		= TEXT_LENGTH_TREND_NAME_LANDSCAPE;
+		nCommentLength	= TEXT_LENGTH_COMMENT_LANDSCAPE;
+	END
+	
+	FOR iPen = 0 TO 7 DO
+		IF _PltPenIsEnabled(iPen) THEN
+			StrToLines(_PltPenNameGet(iPen), (nNameLength * 3) / 4, nNameLines);
+			StrToLines(_FindCommentFromPen(_PltPenNameGet(iPen)), (nCommentLength * 3) / 4, nCommentLines);
+			nLegendHeight = nLegendHeight + (Max(nNameLines, nCommentLines) * _PltFontHeightGet(FONT_NORMAL)) + 
+							((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+		END
+	END
+	 
+	RETURN nLegendHeight;
+END
+
+/*
+**	FUNCTION NAME:	_PltLegendText
+**
+**	Plots the legend text for a single given pen.
+*/
+
+INT 
+FUNCTION
+_PltLegendText(INT hPlot, INT x, INT y, INT iPen, INT nNameLength, INT nCommentLength)
+
+	INT	xText;
+	INT nNameLines = 0;
+	INT nCommentLines = 0;
+
+	xText = x;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+				StrToLines(_PltPenNameGet(iPen), (nNameLength * 3) / 4, nNameLines));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * nNameLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				StrToLines(_FindCommentFromPen(_PltPenNameGet(iPen)), (nCommentLength * 3) / 4, nCommentLines));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * nCommentLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenMinGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenMaxGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MAX;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenAvgGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_AVG;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenLoScaleGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN_SCALE;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenHiScaleGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_ENG_UNITS;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				TrnInfo(_PltPenNameGet(iPen), 7));			
+				
+	RETURN Max(nNameLines, nCommentLines);
+END
+
+
+/************************************************************************/
+/*									*/
+/*		SPC Specific Component Plot Functions				*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltSPCPens
+**		_PltHorizontal
+**		_PltSPCLegend
+**			_PltSPCLegendText
+**
+*************************************************************************/
+
+
+/*
+**	FUNCTION NAME:	_PltSPCPens
+**
+**	Plots the SPC pens. Average, UCL, LCL, USL and LSL.
+*/
+
+INT 
+FUNCTION
+_PltSPCPens(INT hANTrend, INT hPlot, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT Mode, INT Type)
+
+	INT	error;
+	REAL	LoScale;
+	REAL	HiScale;
+	INT	iPen;
+	REAL	Value;
+	REAL	ScaleToPix;
+	INT	y;
+
+	LoScale = _PltSPCLoScaleGet(Type);
+	HiScale = _PltSPCHiScaleGet(Type);
+
+	IF HiScale > LoScale THEN
+		ScaleToPix = (yTopLeft - yBotRite) / (HiScale - LoScale);
+	ELSE
+		ScaleToPix = 1;
+	END
+
+/* Plot Average */
+	iPen = 1;
+	Value = _PltSPCBufGet(Type);
+	_PltHorizontal(hPlot, iPen, xTopLeft, xBotRite, Value, LoScale, HiScale, Mode);
+	y = yBotRite + (Value - LoScale) * ScaleToPix;
+
+	_PltComment(hPlot, "@(Process)", xBotRite + dx, y - dy * 0.1); 
+	IF Type = PLOT_TYPE_MEAN THEN
+		_PltComment(hPlot, "@(Mean)", xBotRite + dx, y + dy * 0.6); 
+	ELSE IF Type = PLOT_TYPE_RANGE THEN
+		_PltComment(hPlot, "@(Range)", xBotRite + dx, y + dy * 0.6); 
+	ELSE IF Type = PLOT_TYPE_STDDEV THEN
+		_PltComment(hPlot, "@(Std. Dev.)", xBotRite + dx, y + dy  * 0.6); 
+	END END END
+
+/* Plot UCL */
+	iPen = 2;
+	Value = _PltUCLBufGet(Type);
+	_PltHorizontal(hPlot, iPen, xTopLeft, xBotRite, Value, LoScale, HiScale, Mode);
+	y = yBotRite + (Value - LoScale) * ScaleToPix;
+	_PltComment(hPlot, "@(UCL)", xBotRite + dx, y + dy / 4); 
+
+/* Plot LCL */
+	iPen = 2;
+	Value = _PltLCLBufGet(Type);
+	_PltHorizontal(hPlot, iPen, xTopLeft, xBotRite, Value, LoScale, HiScale, Mode);
+	y = yBotRite + (Value - LoScale) * ScaleToPix;
+	_PltComment(hPlot, "@(LCL)", xBotRite + dx, y + dy / 4);
+	
+	IF Type = PLOT_TYPE_MEAN THEN
+/* Plot USL */
+		Value = _PltUSLBufGet(Type);
+		iPen = 4;
+		_PltHorizontal(hPlot, iPen, xTopLeft, xBotRite, Value, LoScale, HiScale, Mode);
+		y = yBotRite + (Value - LoScale) * ScaleToPix;
+		_PltComment(hPlot, "@(USL)", xBotRite + dx, y + dy / 4); 
+
+/* Plot LSL */
+		Value = _PltLSLBufGet(Type);
+		iPen = 4;
+		_PltHorizontal(hPlot, iPen, xTopLeft, xBotRite, Value, LoScale, HiScale, Mode);
+		y = yBotRite + (Value - LoScale) * ScaleToPix;
+		_PltComment(hPlot, "@(LSL)", xBotRite + dx, y + dy / 4);
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION NAME:	_PltHorizontal
+**
+**	Plots a horizontal line.
+*/
+REAL xBuf[3];
+REAL yBuf[3];
+
+INT 
+FUNCTION
+_PltHorizontal(INT hPlot, INT iPen, REAL xLeft, REAL xRite, REAL Value, REAL LoScale, REAL HiScale,  INT Mode)
+
+	xBuf[0] = xLeft + 1;
+	xBuf[1] = xRite - 1;
+	yBuf[0] = Value;
+	yBuf[1] = Value;
+	
+	IF Mode = PRINT_MODE_COLOUR THEN
+        	PlotXYLine(hPlot,PEN_SOLID,_PltLineColourGet(iPen),2,NOMARKERS,BLACK,0,2,
+        		xBuf,xLeft,xRite,yBuf,LoScale,HiScale, 
+                	BOTTOM_RIGHT_CORNER + MODE_TREND_DATA);
+	ELSE
+        	PlotXYLine(hPlot,_PltLineStyleGet(iPen),_PltLineColourGet(iPen),2,_PltMarkerStyleGet(iPen),BLACK,0,2,
+        		xBuf,xLeft,xRite,yBuf,LoScale,HiScale,
+        		BOTTOM_RIGHT_CORNER + MODE_TREND_DATA);
+	END
+
+	RETURN 0;
+END
+
+
+
+/*
+**	FUNCTION NAME:	_PltSPCLegend
+**
+**	Plots the SPC Legend.
+*/
+
+FUNCTION
+_PltSPCLegend(INT hPlot, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite, INT Mode)
+
+        INT     x;
+        INT     y;
+	STRING	sPen;
+
+/* Plot Border */
+	_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+
+
+/* Plot Pen Name */        
+
+	sPen = _PltPenNameGet(0);
+	x = (xTopLeft + xBotRite) / 2;
+	x = x - (StrLength(sPen) * _PltFontWidthGet(FONT_NORMAL)) / 2;
+        y = yTopLeft + (dy * 1.5); 
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, sPen);
+
+/* Plot Legend Titles */        
+
+	x = xTopLeft + (dx * 2);
+        y = yTopLeft + (dy * 3.0); 
+
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_NAME;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Value)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_VALUE;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Min.)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MIN;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Max.)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MAX;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(LCL)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_LCL;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(UCL)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_UCL;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(LSL)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_LSL;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(USL)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_USL;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Min. Scale)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MIN_SCALE;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Max. Scale)");
+
+/* Plot Legend Text */
+
+	x = xTopLeft + (dx * 2);
+        y = yTopLeft + (dy * 4.25); 
+
+	_PltSPCLegendText(hPlot, x, y, PLOT_TYPE_MEAN);
+	y = y + dy;
+	_PltSPCLegendText(hPlot, x, y, PLOT_TYPE_RANGE);
+	y = y + dy;
+	_PltSPCLegendText(hPlot, x, y, PLOT_TYPE_STDDEV);
+	y = y + dy;
+
+END
+
+
+/*
+**	FUNCTION NAME:	_PltSPCLegendText
+**
+**	Plots the legend text for a single given pen.
+*/
+
+INT 
+FUNCTION
+_PltSPCLegendText(INT hPlot, INT x, INT y, INT Type)
+
+	INT	xText;
+	INT	hANTrend;
+
+
+	xText = x;
+	IF Type = PLOT_TYPE_MEAN THEN
+		hANTrend = TrnPageANGet();
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+					"@(Process Mean)");
+	ELSE IF Type = PLOT_TYPE_RANGE THEN
+		hANTrend = TrnPageANGet() + 1;
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+					"@(Process Range)");
+	ELSE IF Type = PLOT_TYPE_STDDEV THEN
+		hANTrend = TrnPageANGet() + 2;
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+					"@(Process Std. Dev.)");
+	END END END
+
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_NAME;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltSPCBufGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_VALUE;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltSPCMinBufGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MIN;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltSPCMaxBufGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MAX;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltLCLBufGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_LCL;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltUCLBufGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_UCL;
+
+	IF Type = PLOT_TYPE_MEAN THEN
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+			_PltRealToStr(_PltLSLBufGet(Type)));
+		xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_LSL;
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+			_PltRealToStr(_PltUSLBufGet(Type)));
+		xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_USL;
+	ELSE 
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, "@(n/a)");
+		xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_LSL;
+
+		PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, "@(n/a)");
+		xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_USL;
+	END
+
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltSPCLoScaleGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MIN_SCALE;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltSPCHiScaleGet(Type)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LEN_SPC_MAX_SCALE;
+	
+	RETURN 0;
+END
+
+
+/************************************************************************/
+/*									*/
+/*		Trend Comparison Specific Plot Functions		*/
+/*									*/
+/************************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_PltCmpLegend
+**			_PltCmpLegendText
+**
+*************************************************************************/
+
+/*
+**	FUNCTION NAME:	_PltCmpLegend
+**
+**	Plots the Legend.
+*/
+
+FUNCTION
+_PltCmpLegend(	INT hPlot, INT time1, REAL period1, INT time2, REAL period2, INT xTopLeft, INT yTopLeft, INT xBotRite, INT yBotRite,
+				INT Mode, INT nLandscape)
+
+	INT     x;
+	INT     y;
+	INT     xLeftSample;
+	INT     xRiteSample;
+	INT		xMidSample;
+	INT		iPen;
+	STRING  sPeriod1;
+	STRING  sEndTime1;
+	STRING  sPeriod2;
+	STRING  sEndTime2;
+	INT		nNameLength		= TEXT_LENGTH_TREND_NAME_PORTRAIT;
+	INT		nCommentLength	= TEXT_LENGTH_COMMENT_PORTRAIT;
+
+	IF nLandscape = 1 THEN
+		nNameLength		= TEXT_LENGTH_TREND_NAME_LANDSCAPE;
+		nCommentLength	= TEXT_LENGTH_COMMENT_LANDSCAPE;
+	END
+
+	sPeriod1 = TimeToStr(period1, 5);
+	sPeriod2 = TimeToStr(period2, 5);
+
+	IF _PltTrendTypeGet() = TREND_TYPE_EVENT THEN
+		sEndTime1 = IntToStr(time1);
+		sEndTime2 = IntToStr(time2);
+	ELSE
+		sEndTime1 = TimeToStr(time1,2) + " " + TimeToStr(time1,1);
+		sEndTime2 = TimeToStr(time2,2) + " " + TimeToStr(time2,1);
+	END
+			
+/* Plot Border */
+	_PltBorder(hPlot, xTopLeft, yTopLeft, xBotRite, yBotRite);
+
+/* Plot Legend Titles */        
+	y = yTopLeft + _PltFontHeightGet(FONT_NORMAL) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+	x = xTopLeft + (xPage * 0.01);
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Legend)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_LEGEND;
+	
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Trend Name)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * nNameLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Comment)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * nCommentLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(End Time)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_END_TIME;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Period)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_PERIOD;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Min. Scale)");
+	x = x + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN_SCALE;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, x, y, "@(Max. Scale)");
+
+	y = y + _PltFontHeightGet(FONT_NORMAL) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+	xLeftSample = xTopLeft + (xPage * 0.01);
+	xRiteSample = xLeftSample + (_PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_LEGEND) - (xPage * 0.01);
+	xMidSample  = (xLeftSample + xRiteSample) / 2;
+
+/* Plot Samples */
+	FOR iPen = 0 TO 7 DO
+		IF _PltPenIsEnabled(iPen) THEN
+			IF Mode = PRINT_MODE_COLOUR THEN
+				PlotDraw(hPlot,DRAW_LINE,PEN_SOLID,_PltLineColourGet(iPen),2,TRANSPARENT,xLeftSample,y,xRiteSample,y + 1);
+			ELSE
+				PlotDraw(hPlot,DRAW_LINE,_PltLineStyleGet(iPen),_PltLineColourGet(iPen),1,TRANSPARENT,xLeftSample,y,xRiteSample,y + 1);
+				PlotMarker(hPlot,_PltMarkerStyleGet(iPen),_PltLineColourGet(iPen),1,1,xMidSample,y);
+			END
+			IF iPen < 4 THEN
+				y = y + (	_PltCmpLegendText(hPlot, xRiteSample + (xPage * 0.01), y, iPen, sPeriod1, sEndTime1, nNameLength, nCommentLength) *
+							_PltFontHeightGet(FONT_NORMAL)) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+			ELSE
+				y = y + (	_PltCmpLegendText(hPlot, xRiteSample + (xPage * 0.01), y, iPen, sPeriod2, sEndTime2, nNameLength, nCommentLength) *
+							_PltFontHeightGet(FONT_NORMAL)) + ((_PltFontHeightGet(FONT_NORMAL) * 3) / 4);
+			END
+		END
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	_PltCmpLegendText
+**
+**	Plots the legend text for a single given pen.
+*/
+
+INT 
+FUNCTION
+_PltCmpLegendText(INT hPlot, INT x, INT y, INT iPen, STRING sPeriod, STRING sEndTime, INT nNameLength, INT nCommentLength)
+
+	INT	xText;
+	INT nNameLines = 0;
+	INT nCommentLines = 0;
+	
+	xText = x;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, 
+				StrToLines(_PltPenNameGet(iPen), (nNameLength * 3) / 4, nNameLines));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * nNameLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				StrToLines(_FindCommentFromPen(_PltPenNameGet(iPen)), (nCommentLength * 3) / 4, nCommentLines));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * nCommentLength;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, sEndTime);
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_END_TIME;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y, sPeriod);
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_PERIOD;
+
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenLoScaleGet(iPen)));
+	xText = xText + _PltFontWidthGet(FONT_NORMAL) * TEXT_LENGTH_MIN_SCALE;
+	PlotText(hPlot, _PltFontHandleGet(FONT_NORMAL), LEFTTORIGHT, xText, y,
+				_PltRealToStr(_PltPenHiScaleGet(iPen)));
+				
+	RETURN Max(nNameLines, nCommentLines);
+END
+
+/*
+**
+**	FUNCTION:	PltTrendSetEvents()
+**
+**		calculates the number of events to print 
+**		event trends only
+**
+*/
+INT
+FUNCTION
+PltTrendSetEvents(INT nEnd, INT nStart, INT TrnPrinting)
+
+	INT CalcEvents;
+
+	IF (TrnPrinting = 0) THEN
+		CalcEvents = 0;
+	ELSE
+		CalcEvents = (nEnd - nStart) + 1;
+		CalcEvents = CalcEvents - (CalcEvents MOD VERTGRIDS);
+	END
+
+	nEvents = CalcEvents;
+	RETURN nEvents;
+END
+
+/*
+**
+**	FUNCTION:	PltTrendGetEvents()
+**
+**		accessor function for nEvents global. 
+**		event trends only
+**		Valid only after call to PltTrendSetEvents
+**
+*/
+INT
+FUNCTION
+PltTrendGetEvents()
+
+	RETURN nEvents;
+
+END

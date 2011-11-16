@@ -1,0 +1,1902 @@
+/*
+**	FILE:	Spcplus.ci
+**
+**	AUTHOR:	Kien Mac
+**
+**	DATE:   May 1996
+**
+**	REVISION	DATE		AUTHOR
+**
+**	Rev 0		May 1996	Kien Mac
+**	Rev 1		July 1996	Greg Symington
+**
+**	NOTES:
+**
+**	The following code is divided into five sections.
+**
+**	Section 1: Setup functions used to initialise
+**		and update data buffers.
+**	Section 2: SPC Data Object functions. These 
+**		functions manipulate or report on specific global data.
+**	Section 3: Cursor and misc. functions.
+**	Section 4: Cp&Cpk page only functions.
+**	Section 5: XRS page only functions.
+**
+*/
+/************************ defines ***************************************/
+
+	INT	TRN_NO_VALUE		  = -32001;
+
+	INT	SPC_DEFAULT_WIDTH	  = 9;
+
+	INT	TRN_MODE_REALTIMEPlus	  = 0;
+
+        INT	AUTOMATIC_SET   	  = 0;
+	INT	MANUAL_SET      	  = 1;
+	INT	TRN_MODE_REALTIME 	  = 0;
+
+	INT	SPC_INFO_SUBGROUP_SIZE	  = 1;
+	INT	SPC_INFO_NO_SUBGROUPS	  = 2;
+	INT	SPC_INFO_PROCESS_MEAN	  = 3;
+	INT	SPC_INFO_PROCESS_RANGE	  = 4;
+	INT	SPC_INFO_PROCESS_STDDEV	  = 5;
+	INT	SPC_INFO_LSL		  = 6;
+	INT	SPC_INFO_USL		  = 7;
+	INT	SPC_INFO_PROCESS_CP	  = 8;
+	INT	SPC_INFO_PROCESS_CPK	  = 9;
+	INT	SPC_INFO_PROCESS_SKEWNESS = 10;
+	INT	SPC_INFO_PROCESS_KURTOSIS = 11;
+
+	INT	SPC_DATA_MATH	 	  = 1;
+	INT	SPC_DATA_SUBGRP 	  = 2;
+	INT	SPC_DATA_CLIENT 	  = 4;
+	INT	SPC_DATA_HISTGM 	  = 8;
+
+	INT	SPC_DATA_XRS_PAGE 	  = 7;
+	INT	SPC_DATA_CP_PAGE 	  = 12;
+
+	INT	SPC_OFFSET_MEAN		  = 25;
+	INT	SPC_OFFSET_RANGE	  = 26;
+	INT	SPC_OFFSET_STDDEV	  = 27;
+
+	INT	SPC_TREND_TYPE_PERIODIC	  = 1;
+	INT	SPC_TREND_TYPE_EVENT	  = 2;
+
+/* SPC Type Defines */
+
+	INT	SPC_TYPE_XUCL	= 1;
+	INT	SPC_TYPE_XLCL	= 2;
+	INT	SPC_TYPE_RUCL	= 3;
+	INT	SPC_TYPE_RLCL	= 4;
+	INT	SPC_TYPE_SUCL	= 5;
+	INT	SPC_TYPE_SLCL	= 6;
+	INT	SPC_TYPE_MEAN	= 7;
+	INT	SPC_TYPE_RANGE	= 8;
+	INT	SPC_TYPE_STDDEV	= 9;
+	INT	SPC_TYPE_LSL	= 10;
+	INT	SPC_TYPE_USL	= 11;
+
+/* NOTE: If changing SPC_SUBGROUP_SIZE_MAX then you must also change
+			 the dimension of the SubGrp array below to 
+			 SPC_SUBGROUP_SIZE_MAX + 3;
+*/
+	INT SPC_SUBGROUP_SIZE_MIN 	= 1
+	INT	SPC_SUBGROUP_SIZE_MAX	= 40
+
+/************************ global object variables ***********************/
+
+/* Histogram Plot Data */
+	INT	ghANPlot = 0;
+        REAL    PlotAreaHeight = 0.0;
+        REAL    PlotAreaLength = 0.0;
+	INT	iBoxLength;
+	INT	iBoxHeight;
+
+        REAL    XDB;
+        REAL    PXDBValue;
+        REAL    SigP;
+
+        INT     bRotateCurve = 0;
+
+/* SPC Client Data */
+        REAL    SPCClientInfoBuffer[11];
+
+/* Math Data */
+	INT	MathLength;
+	REAL    MathTable[1725];
+	INT	TimeTable[1725];
+
+/* Subgroup Data */
+        INT     iSubgrpSize = 5;
+        INT     iSubgrpNo = 0;
+        INT     iOffSet = 0;
+        REAL    SubGrp[43];
+
+/* Histogram Frequency Data */
+        INT     iNumberofbarsCheck = 100;
+        INT     iNumberofBars = 15;
+        REAL    BarFreq[101];
+        REAL    GlobalMaxFreq;
+
+/* Synchronisation */
+	INT	bPumpDataUpdate = FALSE;
+
+
+
+/*****************************************************************/
+/**								**/
+/**		Setup SPC functions				**/
+/**								**/
+/*****************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		DspSPCXRS
+**		DspSPCCp
+**		_SPCPageSetup
+**		_SPCDataUpdateTask
+**		_SPCDataUpdate
+**
+******************************************************************/
+
+/*
+**      FUNCTION NAME:	DspSPCXRS
+**
+**	INVOCATION:	PgAdv on SPCXRS template.
+**
+**      Sets up XRS page data buffers
+*/
+
+FUNCTION
+DspSPCXRS(INT hANTrend)
+
+	IF PageInfo(7) = "0" THEN
+		TrnPageTimeSPCSet(-1);
+		TrnPageTypeSPCSet(SPC_DATA_XRS_PAGE);
+		TrnPageAnSet(hANTrend);
+		TaskNew("_SPCDataUpdateTask", IntToStr(hANTrend) + "," + IntToStr(TrnPageTypeSPCGet()), 1);
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	DspSPCCp
+**
+**	INVOCATION:	PgAdv on SPCCp template.
+**
+**      Sets up Cp & Cpk page data buffers
+*/
+
+FUNCTION
+DspSPCCp(INT hANTrend, INT hANPlot, INT iLength, INT iHeight)
+
+	IF PageInfo(7) = "0" THEN
+
+		iBoxLength = iLength;
+		iBoxHeight = iHeight;
+		ghANPlot = hANPlot;
+
+		TrnPageTimeSPCSet(-1);
+		TrnPageTypeSPCSet(SPC_DATA_CP_PAGE);
+		TrnPageAnSet(hANTrend);
+		TaskNew("_SPCDataUpdateTask", IntToStr(hANTrend) + "," + IntToStr(TrnPageTypeSPCGet()), 1);
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	_SPCDataUpdateTask
+**
+**	This function is called as a task when an Spc page is entered.
+**	It will update Spc values as they are recalculated at every
+**	period times subgroup size duration. When Spc is scrolled into
+**	the past update will stop until it is scrolled back to the 
+**	present time.
+*/
+
+FUNCTION
+_SPCDataUpdateTask(INT hANTrend, INT nMode)
+
+	INT	SleepSec 	= 2;
+	INT	SleepAcc	= 0;
+	INT	PrevSample 	= 0;
+	INT	NextSample 	= 0;
+	INT	iEndTime 	= 0;
+	INT	bStartFlag  	= -1;
+	INT 	iPeriod     	= 0;
+	INT	iSampleTime 	= 5;
+	INT	nTrnType;
+
+	WHILE 1 DO
+
+		IF TrnGetMode(hANTrend, 0) = TRN_MODE_REALTIMEPlus THEN
+			TrnScroll(-1, -1, 100);
+		ELSE
+			bStartFlag = -1;
+		END
+
+		nTrnType = _TrendTypeGet(_TrendPenNameGet(hANTrend, 0), 0);
+
+		IF nTrnType <> -1 THEN
+			IF nTrnType = SPC_TREND_TYPE_EVENT THEN
+				iEndTime = TrnGetEvent(hANTrend, 0, 0);
+			ELSE
+				iEndTime = TrnGetTime(hANTrend, 0, 0);
+			END
+
+			IF nMode BITAND SPC_DATA_CLIENT THEN
+				_SPCClientDataRefresh(hANTrend);
+			END
+
+			IF TrnPageTimeSPCGet() <> iEndTime THEN
+	
+				TrnPageTimeSPCSet(iEndTime);
+				SleepMS(400);	/* delay inserted to allow new data from scroll to arrive. GS. to be removed */
+				_SPCDataUpdate(hANTrend, nMode);
+
+				IF bStartFlag = -1 THEN
+					bStartFlag = 1;
+				ELSE
+					bStartFlag = 0;
+				END
+			END
+
+			iPeriod = TrnGetPeriod(hANTrend);
+			IF iPeriod = 0 THEN 
+				iPeriod = 1;
+			END
+
+			iSampleTime = iPeriod * _SPCClientInfoGet(SPC_INFO_SUBGROUP_SIZE);
+		ELSE 
+			iPeriod	    = 1;	// 1 second	
+			iSampleTime = 5;	// 5 seconds
+			_SPCClientDataClear();
+		END
+
+		IF bStartFlag <> 0 THEN
+			SleepSec = iPeriod;
+			PrevSample = 0;
+			NextSample = 0;
+		ELSE
+			IF PrevSample = 0 THEN
+				PrevSample = TimeCurrent();
+			END
+
+			NextSample = PrevSample + iSampleTime;
+			SleepSec = NextSample - TimeCurrent();
+		END
+
+		IF SleepSec < 0 THEN
+			SleepSec = 0;
+		END
+
+		SleepAcc = 0;
+
+		WHILE SleepAcc < SleepSec DO
+			IF bPumpDataUpdate THEN
+				bStartFlag = -1;
+				SleepAcc = SleepSec;
+			ELSE
+				SleepAcc = SleepAcc + 1;
+				Sleep(1);
+			END
+		END
+
+		PrevSample = NextSample;
+	END
+END
+
+/*
+**	FUNCTION NAME: SPCDataUpdateNow
+**	
+**	External accesor for _SPCDataUpdateNow
+*/
+
+FUNCTION
+SPCDataUpdateNow(INT hANTrend)
+	
+	_SPCDataUpdateNow(hANTrend, TrnPageTypeSPCGet());
+END
+
+/*
+**	FUNCTION NAME: _SPCDataUpdateNow
+**
+**	Creates _SPCDataUpdateTask
+*/
+
+FUNCTION
+_SPCDataUpdateNow(INT hANTrend, INT nMode)
+
+	TaskNew("_SPCDataUpdatePump", "", 1 + 8);
+
+END
+
+/*
+**	FUNCTION NAME: _SPCDataUpdatePump
+**
+**	Sets the pump flag then sleeps before resetting it
+*/
+
+FUNCTION
+_SPCDataUpdatePump()
+	
+	bPumpDataUpdate = TRUE;
+	Sleep(1);
+	bPumpDataUpdate = FALSE;
+
+END
+	
+
+/*
+**      FUNCTION NAME:	_SPCDataUpdate
+**
+**      Sets up Cp & Cpk page data buffers
+*/
+
+FUNCTION
+_SPCDataUpdate(INT hANTrend, INT nMode)
+
+	IF nMode BITAND SPC_DATA_CLIENT THEN
+		_SPCClientDataRefresh(hANTrend);
+		iSubgrpSize = _SPCClientInfoGet(SPC_INFO_SUBGROUP_SIZE);
+	END
+
+	IF nMode BITAND SPC_DATA_SUBGRP THEN
+		_SPCSubgrpDataRefresh(hANTrend);
+	END
+
+	IF nMode BITAND SPC_DATA_MATH THEN
+		_SPCMathDataRefresh(hANTrend);
+	END
+
+	IF nMode BITAND SPC_DATA_HISTGM THEN
+		_SPCHistgmDataRefresh(hANTrend);
+		SPCGlobalMaxFreqSet();
+		TaskNew("_SPCCpChartTask", "", 1);
+	END
+
+END
+
+
+/*****************************************************************/
+/**								**/
+/**			SPC data object functions		**/
+/**								**/
+/*****************************************************************/
+
+/*
+**	FUNCTIONS:
+**
+**		_SPCClientInfoRefresh
+**		SPCClientInfoGet
+**		DspSPCClientInfo
+**
+**		_SPCMathDataRefresh
+**		_GetTable
+**		DspSPCMathData
+**
+**		_SPCHistogramTableRefresh
+**		SPCNumberofBarsSet
+**		SPCNumberofBarsGet
+**
+**		SPCGlobalMaxFreqSet
+**		SPCGlobalMaxFreqGet
+**		_SPCNormalBarFreq
+**		_SPCHistgmDataRefresh
+**		SPCNumberofBarsSet
+**		SPCNumberofBarsGet
+**
+**		SPCSubgrpNoGet
+**		SPCSubgrpNoSet
+**		_SPCSubgrpDataRefresh
+**		DspSPCSubgrpData
+**		SPCSubgrpDataLocationGet
+**		SPCSubgrpUpDnScroll
+**		_SPCSubgrpDataGet
+**		SPCSubgrpSizeSet
+**
+******************************************************************/
+
+
+/********************* Client Data Functions *********************/
+
+/*
+**      FUNCTION NAME:	_SPCClientDataRefresh
+**
+**      This function gets the client information about the SPC calculations
+**	and stores it in a buffer for referencing.
+*/
+
+FUNCTION
+_SPCClientDataRefresh(INT hANTrend)
+
+        INT     i;
+        STRING  sSPCTag;
+
+        sSPCTag = TrnGetPen(hANTrend, 0);
+
+	IF StrLength(sSPCTag) <> 0 THEN
+	        FOR i = 0 TO 10 DO
+	                SPCClientInfoBuffer[i] = Round(SPCCLientInfo(sSPCTag,i+1),3);
+	        END
+	END
+END
+
+/*
+**      FUNCTION NAME:	_SPCClientDataClear
+**
+**      This function clears the client information about the SPC calculations.
+**	For example on page entry.
+*/
+
+FUNCTION
+_SPCClientDataClear()
+	
+	INT i;
+
+	FOR i = 0 TO 10 DO
+		SPCClientInfoBuffer[i] = 0;
+	END
+END
+
+/*
+**      FUNCTION NAME:	SPCClientInfoGet
+**
+**      This function returns the information stored in the 
+**      current buffer based on the "type" requested.
+*/
+
+REAL
+FUNCTION
+_SPCClientInfoGet(INT iType)
+
+	RETURN SPCClientInfoBuffer[iType-1];
+END
+
+
+/*
+**      FUNCTION NAME:	DspSPCClientInfo
+**
+**	INVOCATION:	PgNum on SPCCp & SPCXRS templates.
+**
+**      This function returns the information stored in the 
+**      current buffer based on the "type" requested.
+**	The information is ready for display.
+*/
+
+STRING
+FUNCTION
+DspSPCClientInfo(INT iType, INT nPlaces = 0)
+
+	RETURN SPCRealToStr(_SPCClientInfoGet(iType), SPC_DEFAULT_WIDTH, nPlaces);
+END
+
+
+/**************************** Subgroup Math Functions *****************************/
+
+/*
+**      FUNCTION NAME:	_SPCMathDataRefresh
+**
+**      Calls task to refresh maths table data.
+*/
+
+FUNCTION
+_SPCMathDataRefresh(INT hANTrend)
+
+	MathLength = (_SPCClientInfoGet(SPC_INFO_SUBGROUP_SIZE) * _SPCClientInfoGet(SPC_INFO_NO_SUBGROUPS));
+
+	IF MathLength > 1725 THEN
+		MathLength = 1725;
+	END
+
+	TaskNew("_GetTable", IntToStr(hANTrend), 1);
+
+END
+
+
+/*
+**      FUNCTION NAME:	_GetTable
+**
+**      Requests table data currently displayed.
+*/
+
+FUNCTION
+_GetTable(INT hANTrend, INT Length = 0)
+
+	INT nTrnType;
+
+	Sleep(0);
+
+	nTrnType = TrnInfo(TrnGetPen(hANTrend,0), 1);
+
+	ErrSet(1);
+	IF nTrnType = SPC_TREND_TYPE_EVENT THEN
+		TrnEventGetTable(TrnGetPen(hANTrend,0), TrnGetEvent(hANTrend,0,0), 0, MathLength, MathTable, TimeTable, 1);
+	ELSE
+		TrnGetTable(TrnGetPen(hANTrend,0), TrnGetTime(hANTrend,0,0), 0, MathLength, MathTable, 1);
+	END
+	ErrSet(0);
+END
+
+
+/*
+**      FUNCTION NAME:	DspSPCMathData
+**
+**	INVOCATION:	PgNum on SPCXRS template.
+**
+**      Returns the min/max of the data represented on the current screen.
+** 		iChoice=0	Minimum
+**      	iChoice=1	Maximum
+*/
+
+STRING
+FUNCTION
+DspSPCMathData(INT hAn, INT iChoice, INT nPlaces = 0)
+
+	REAL	Value;
+	STRING	sResult;
+
+	IF (iChoice=1 OR iChoice=0) AND MathLength > 0 THEN
+
+		Value = (TableMath(MathTable,MathLength,iChoice,1));
+
+		IF TrnIsValidValue(Value) <> 0 THEN
+			sResult = "<na>";
+		ELSE
+			sResult = RealToStr(Value, 9, nPlaces);
+		END
+	ELSE
+		sResult = "<na>";
+	END
+
+	RETURN sResult;
+END
+
+
+/**************************** Histogram Frequency Functions *****************************/
+
+/* Data access functions */
+
+	FUNCTION SPCGlobalMaxFreqSet() GlobalMaxFreq = TableMath(BarFreq,iNumberofBars,1,0); END
+
+	FUNCTION SPCGlobalMaxFreqClear() GlobalMaxFreq = TrnGetInvalidValue(); END
+
+REAL	FUNCTION SPCGlobalMaxFreqGet() RETURN GlobalMaxFreq; END
+
+REAL	FUNCTION _SPCBarFreqTotalGet() RETURN TableMath(BarFreq,iNumberofBars,4,0); END
+
+
+/*
+**      FUNCTION NAME:	_SPCNormalBarFreq
+**
+**      Normalise BarFreq array so that total integrated bar area = 1.
+*/
+
+FUNCTION
+_SPCNormalBarFreq(REAL BarFreqArea)
+
+	INT i;
+
+	IF BarFreqArea <= 0 THEN
+		RETURN;
+	END
+
+	FOR i = 0 TO (iNumberofBars - 1) DO
+		BarFreq[i] = BarFreq[i] / BarFreqArea;
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	_SPCHistgmDataRefresh
+**
+**      Gets the information required for plotting the SPC histogram
+**	and stores it in a buffer for referencing.
+*/
+
+FUNCTION
+_SPCHistgmDataRefresh(INT hANTrend)
+
+        SPCGetHistogramTable(TrnGetPen(hANTrend, 0), iNumberofBars, BarFreq);
+END
+
+
+/*
+**      FUNCTION NAME:	SPCNumberofBarsSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCCp template.
+**
+**      This function sets the total number of bars that are displayed. Allowable
+**      values are between 7 and iNumberofbarsCheck.
+*/
+
+FUNCTION
+SPCNumberofBarsSet(INT hANTrend, STRING Inkey = "")
+
+        INT     Temp;
+
+        IF Inkey = "" THEN
+	        Temp = StrToInt(FormNumPad("@(Number of bars to display)", iNumberofBars, 0));
+        ELSE 
+        	Temp = StrToInt(Inkey);
+        END
+
+	IF Temp < 7 OR Temp > iNumberofbarsCheck THEN
+	        Message("@(Error)", "@(Number of bars should be)" + " >= 7 " + "@(and)" + " =< " 
+        			+ IntToStr(iNumberofbarsCheck), 48);
+	ELSE 
+		iNumberofBars = Temp;
+	END
+
+	_SPCDataUpdateNow(hANTrend, SPC_DATA_HISTGM);
+END
+
+/*
+**      FUNCTION NAME:	SPCNumberofBarsGet
+**
+**	INVOCATION:	PgNum on SPCCp template.
+**
+**      Returns the number of bars currently displayed.
+*/
+
+INT
+FUNCTION
+SPCNumberofBarsGet()
+
+        RETURN iNumberofBars;
+
+END
+
+
+/**************************** Subgroup Data Functions *****************************/
+
+/* Data access functions */
+
+INT	FUNCTION SPCSubgrpNoGet() RETURN iSubgrpNo; END
+
+
+/*
+**      FUNCTION NAME:  _SPCSubgrpNoSet
+**
+**	Sets the current subgroup number (for the cursor).
+**	Returns: error = 0	No error
+**		 error = 1	value too large
+**		 error = -1	value less than zero
+*/
+
+INT
+FUNCTION 
+_SPCSubgrpNoSet(INT NewNo) 
+
+	INT	NoSubGroups;
+	INT	error = 0;
+
+	NoSubGroups = _SPCClientInfoGet(SPC_INFO_NO_SUBGROUPS);
+
+        IF NewNo > NoSubGroups THEN
+		NewNo = NoSubGroups;
+		error = 1;
+	END
+        IF NewNo < 0 THEN
+		NewNo = 0;
+		error = -1;
+	END
+	iSubgrpNo = NewNo;
+	
+	RETURN error;
+END
+
+
+/*
+**      FUNCTION NAME:  _SPCSubgrpDataRefresh
+**
+**      Sets up the Subgrp array then gets the last three elements (Mean, Range, StdDev)
+**      and places them at the end of the array. ie It moves the mean to position 25,
+**      Range to position 26, and Std Dev to Position 27 in the array "Subgrp".
+*/
+
+FUNCTION
+_SPCSubgrpDataRefresh(INT hANTrend)
+
+        STRING  sSPCTag;
+
+        sSPCTag = TrnGetPen(hANTrend, 0);
+
+	IF (StrLength(sSPCTag) <> 0) THEN
+	        SPCGetSubgroupTable(sSPCTag, iSubgrpNo, Subgrp);
+	END
+
+        Subgrp[SPC_OFFSET_MEAN] = Subgrp[(iSubgrpSize - 1) + 1];
+        Subgrp[SPC_OFFSET_RANGE] = Subgrp[(iSubgrpSize - 1) + 2];
+        Subgrp[SPC_OFFSET_STDDEV] = Subgrp[(iSubgrpSize - 1) + 3];
+END
+
+
+/*
+**      FUNCTION NAME:	DspSPCSubgroupData
+**
+**	INVOCATION:	PgNum on SPCXRS template.
+**
+**      This function returns subgroup data for display. 
+*/
+
+STRING
+FUNCTION
+DspSPCSubgrpData(INT iType, INT nPlaces = 0)
+
+	RETURN SPCRealToStr(SPCSubgrpDataGet(iType), SPC_DEFAULT_WIDTH, nPlaces);
+END
+
+
+/*
+**      FUNCTION NAME:	SPCSubgrpDataLocationGet
+**
+**	INVOCATION:	PgStr on SPCXRS template.
+**
+**      This function displays the location of the subgroup data
+**      that is being displayed within the subgroup.
+*/
+
+STRING 
+FUNCTION
+SPCSubgrpDataLocationGet(INT iOffsetInc)
+
+	INT     DspElement;
+
+	DspElement = iOffSet + iOffSetInc + 1;
+
+	RETURN ("X" + IntToStr(DspElement));
+
+END
+
+
+/*
+**      FUNCTION NAME:  SPCSubgrpUpDnScroll
+**
+**	INVOCATION:	PgButton on SPCXRS template.
+**
+**      This function scroll the Subgrp array offset. 
+*/
+
+FUNCTION
+SPCSubgrpUpDnScroll(INT hANTrend, INT Increment = 0)
+
+	INT NewOffset = iOffset + Increment;
+
+	IF NewOffset >= 0 AND (NewOffset + 5) <= iSubgrpSize THEN
+		iOffset = NewOffset;
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	SPCSubgrpDataGet
+**
+**	INVOCATION:	PgNum on SPCXRS template.
+**
+**	Returns the specified value within the subgroup. The element requested
+**	is the display offset plus the passed offset.
+**	If the passed offset is 25, 26 or 27 then the value returned will be 
+**	the subgroup mean, range or std dev respectively. If invalid data is 
+**	requested then TRN_NO_VALUE is returned.
+*/
+
+REAL
+FUNCTION
+SPCSubgrpDataGet(INT iOffsetInc)
+
+	INT	DspElement = iOffset + iOffsetInc;
+
+	IF 	   iOffsetInc = SPC_OFFSET_MEAN 
+		OR iOffsetInc = SPC_OFFSET_RANGE 
+		OR iOffsetInc = SPC_OFFSET_STDDEV THEN
+
+		RETURN Subgrp[iOffsetInc];
+	END
+
+	IF iOffsetInc >= 5 OR iOffsetInc < 0 THEN
+
+		RETURN TrnGetInvalidValue();
+	END
+
+	IF DspElement < iSubgrpSize THEN
+
+		RETURN Subgrp[DspElement];
+	ELSE
+		RETURN TrnGetInvalidValue();
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	SPCSubgrpSizeSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCXRS template.
+**
+**	Sets the subgroup size. Allowable subgroup sizes are
+**      SPC_SUBGROUP_SIZE_MIN
+**		SPC_SUBGROUP_SIZE_MAX
+**		(refer above for definitions)
+*/
+
+FUNCTION
+SPCSubgrpSizeSet(INT hANTrend, STRING Inkey = "")
+
+        STRING  sSPCTag;
+        INT     Temp;
+
+        sSPCTag = TrnGetPen(hANTrend, 0);
+
+	IF Inkey = "" THEN
+	        Temp = StrToInt(FormNumPad("@(Subgroup Size)", iSubgrpSize,0));
+        ELSE 
+        	Temp = StrToInt(Inkey);
+        END
+
+	IF Temp < SPC_SUBGROUP_SIZE_MIN OR Temp > SPC_SUBGROUP_SIZE_MAX THEN
+	        Message("@(Error)", "@(Subgroup size should be)" + " >= " + IntToStr(SPC_SUBGROUP_SIZE_MIN) + 
+	        	" @(AND)" + " =< " + IntToStr(SPC_SUBGROUP_SIZE_MAX), 48);
+	ELSE 
+		iSubgrpSize = Temp;
+	END
+        
+        iOffset = 0;
+        SPCSubgroupSizeSet(sSPCTag, iSubgrpSize);
+	
+	IF TrnGetMode(hANTrend, 0) = TRN_MODE_REALTIMEPlus THEN
+		TrnScroll(-1, -1, 100);
+		TrnScroll(-1, -1, -100);
+		TrnSetTime(-1, -1, 0);
+	ELSE
+		TrnScroll(-1, -1, 0);
+	END
+
+	_SPCDataUpdateNow(hANTrend, TrnPageTypeSPCGet());
+END
+
+
+/*****************************************************************/
+/**								**/
+/**		Cursor and Misc. SPC functions			**/
+/**								**/
+/*****************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		DspSPCCursorValue
+**		SPCTrnCursorSet
+**		_SPCTrnCursorSet
+**		SPCTrnCursorScroll
+**
+**		SPCControlLimitSet
+**		SPCLimitGet
+**
+******************************************************************/
+
+/*
+**      FUNCTION NAME:	DspSPCCursorValue
+**
+**	INVOCATION:	PgNum on SPCCp & SPCXRS templates.
+**
+**      Returns the current value at the cursor.
+*/
+
+STRING
+FUNCTION
+DspSPCCursorValue(INT hTrendAN, INT nPlaces = 0)
+	REAL	rValue;
+
+	ErrSet(1);
+	IF TrnGetCursorPos(hTrendAN) <> -1 THEN
+		rValue = TrnGetCursorValue(hTrendAN, 4);
+	ELSE
+		rValue = TrnGetBufValue(hTrendAN, 4, 0);
+	END
+	ErrSet(0);
+
+	RETURN SPCRealToStr(rValue, SPC_DEFAULT_WIDTH, nPlaces);
+END
+
+
+/*
+**      FUNCTION NAME:	SPCTrnCursorSet
+**
+**	INVOCATION:	_TrendMouseCursor on SPCXRS template.
+**
+**      This function is used in conjunction with function "_TrendMouseCursor()" 
+**	in the trend.ci file to allow 1 cursor for all 3 trends on the SPC XRS 
+**	page. The trend AN's used must be consecutive.
+*/
+
+FUNCTION
+SPCTrnCursorSet(INT hANTrend1, INT x)
+
+	INT	hAn;
+	INT	count;
+	INT	bSuccess = FALSE;
+        INT     i, y;
+	INT	xt, yt;
+	INT	offset;
+        INT     width;
+
+	FOR count = 1 TO 5 DO
+		hAn = hANTrend1 + count - 3;
+
+		IF (_SPCTrnCursorSet(hAn, x) = 1) THEN 
+			bSuccess = TRUE; 
+		END
+	END
+
+	IF bSuccess THEN
+		DspAnGetPos(hANTrend1, xt, yt);
+	        width = DspTrendInfo(DspAnInfo(hANTrend1, 1), 3, hANTrend1);
+		IF width > 0 THEN
+                	offset = (xt - x + width / 2) / width;
+			_SPCSubgrpNoSet(offset);
+			_SPCDataUpdateNow(hANTrend1, SPC_DATA_SUBGRP);
+		END
+	END
+END
+
+
+INT
+FUNCTION
+_SPCTrnCursorSet(INT hANTrend, INT x)
+
+        INT     i, y;
+	INT	xt, yt;
+	INT	offset;
+        INT     width;
+
+	IF DspAnInfo(hANTrend, 0) = "6" THEN
+		
+		DspAnGetPos(hANTrend, xt, yt);
+	        width = DspTrendInfo(DspAnInfo(hANTrend, 1), 3, hANTrend);
+		IF width > 0 THEN
+	                offset = (xt - x + width / 2) / width;
+	                TrnSetCursorPos(hANTrend, offset);
+	                _SPCSubgrpNoSet(offset);
+	        END
+
+		RETURN 1;
+	ELSE
+		RETURN 0;
+	END
+END
+
+
+/*
+**      FUNCTION NAME:	SPCTrnCursorScroll
+**
+**	INVOCATION:	PgButton on SPCCp and SPCXRS templates.
+**
+**      Used to allow the scrolling of 3 trend cursors simultaneously
+**      using the cursor scroll buttons
+*/
+
+FUNCTION
+SPCTrnCursorScroll(STRING hANTrend1, STRING hANTrend2, STRING hANTrend3, INT iSamples);
+
+        INT     Temp;
+
+        IF hANTrend2 = "" AND hANTrend3 = "" THEN
+		TrnSetCursor(StrToInt(hANTrend1), iSamples);
+        ELSE
+		TrnSetCursor(StrToInt(hANTrend1), iSamples);
+		TrnSetCursor(StrToInt(hANTrend2), iSamples);
+		TrnSetCursor(StrToInt(hANTrend3), iSamples);
+        END
+
+        Temp = TrnGetCursorPos(StrToInt(hANTrend1));
+        _SPCSubgrpNoSet(Temp);
+
+	_SPCDataUpdateNow(hANTrend1, SPC_DATA_SUBGRP);
+END
+
+
+
+/**************************** Other SPC Functions *****************************/
+
+/*
+**	FUNCTION NAME:	SPCControlLimitSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCXRS template.
+**
+**	Allows control limits to be set via keyboard or numeric pad on screen.
+*/
+
+REAL gMean = 0;
+REAL gRange = 0;
+REAL gStdDev = 0;
+REAL gLSL = 0;
+REAL gUSL = 0;
+
+FUNCTION
+SPCControlLimitSet(INT hAn,INT SPCType,STRING Inkey = "")
+        INT     Setting;
+        REAL    Value = 0;
+	STRING	sPen;
+
+	sPen = TrnGetPen(hAn, 0);
+
+	IF SPCType = 7 OR SPCType = 8 OR SPCType = 9 THEN
+		Value = TrnGetInvalidValue();
+	END
+
+	IF Inkey = "" THEN
+		Value = StrToReal(FormNumPad("@(Control Limit)",Value,20));
+       	ELSE
+       		IF Inkey <> "!" THEN
+                	Value = StrToReal(Inkey);
+		END
+	END
+        
+        IF Inkey = "!" THEN
+		Setting = AUTOMATIC_SET;
+        ELSE
+		Setting = MANUAL_SET;
+        END
+	
+	IF SPCType < SPC_TYPE_MEAN THEN
+       		SPCSetLimit(hAn,SPCType,Value,Setting);
+
+	ELSE IF	SPCType = SPC_TYPE_MEAN THEN
+		SPCProcessXRSGet(sPen, gMean, gRange, gStdDev);
+		gMean = Value;
+		SPCProcessXRSSet(sPen, gMean, gRange, gStdDev);
+
+	ELSE IF	SPCType = SPC_TYPE_RANGE THEN
+		SPCProcessXRSGet(sPen, gMean, gRange, gStdDev);
+		gRange = Value;
+		SPCProcessXRSSet(sPen, gMean, gRange, gStdDev);
+
+	ELSE IF	SPCType = SPC_TYPE_STDDEV THEN
+		SPCProcessXRSGet(sPen, gMean, gRange, gStdDev);
+		gStdDev = Value;
+		SPCProcessXRSSet(sPen, gMean, gRange, gStdDev);
+
+	ELSE IF	SPCType = SPC_TYPE_LSL THEN
+		SPCSpecLimitGet(sPen,gLSL,gUSL);
+		gLSL = Value;
+		SPCSpecLimitSet(sPen, gLSL, gUSL);
+
+	ELSE IF	SPCType = SPC_TYPE_USL THEN
+		SPCSpecLimitGet(sPen,gLSL,gUSL);
+		gUSL = Value;
+		SPCSpecLimitSet(sPen, gLSL, gUSL);
+
+	END END END END	END END
+
+END
+
+
+/*
+**	FUNCTION NAME:	SPCLimitGet
+**
+**	Returns the upper and lower control limits etc.
+*/
+
+REAL
+FUNCTION
+SPCLimitGet(INT hANTrend, INT SPCType)
+
+        INT     iPenNo;
+        STRING  sBasePen;
+	REAL	Value;
+        
+        sBasePen = TrnGetPen( hANTrend, 0 );
+        
+        IF SPCType <= SPC_TYPE_SLCL THEN
+                
+                IF SPCType = SPC_TYPE_XUCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".XUCL");
+                END
+                IF SPCType = SPC_TYPE_XLCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".XLCL");
+                END
+                IF SPCType = SPC_TYPE_RUCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".RUCL");
+                END
+                IF SPCType = SPC_TYPE_RLCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".RLCL");
+                END
+                IF SPCType = SPC_TYPE_SUCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".SUCL");
+                END
+                IF SPCType = SPC_TYPE_SLCL THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".SLCL");
+                END
+
+		Value = TrnGetBufValue( hANTrend, iPenNo, 0 ); 
+
+        ELSE IF SPCType <= SPC_TYPE_STDDEV THEN
+
+                IF SPCType = SPC_TYPE_MEAN THEN
+                        iPenNo = TrnGetPenNo( hANTrend, sBasePen + ".XCL" );
+                END
+                IF SPCType = SPC_TYPE_RANGE THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".RCL");
+                END
+                IF SPCType = SPC_TYPE_STDDEV THEN
+                        iPenNo = TrnGetPenNo(hANTrend, sBasePen + ".SCL");
+                END
+
+	       	Value = TrnGetBufValue( hANTrend, iPenNo, 0 ); 
+
+        ELSE IF SPCType <= SPC_TYPE_USL THEN
+		SPCSpecLimitGet(sBasePen,gLSL,gUSL);
+		IF SPCType = SPC_TYPE_LSL THEN
+			Value = gLSL
+		END
+		IF SPCType = SPC_TYPE_USL THEN
+			Value = gUSL
+		END
+	END END END
+        
+	RETURN Value;
+END
+
+
+/*****************************************************************/
+/**								**/
+/**		Cp & Cpk page only functions			**/
+/**								**/
+/*****************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		_SPCCpChartTask
+**		_SPCPlotAreaSetUp
+**
+**		_SPCCalculatePXDB
+**		_SPCCalculatePX
+**
+**		CpChartRotateCurve
+**		CpChartRotated
+**
+**		DspCpChartInfo
+**
+******************************************************************/
+
+/*
+**      FUNCTION NAME:	_SPCCpChartTask
+**
+**	INVOCATION:	called by initialisation/data update code.
+**
+**	This function calculates and plots the following:
+**		Normal Distribution Curve	(White)
+**		Mean				(Yellow)
+**		Mean + 3 * Sigma		(Dark Grey - dotted)
+**		Mean - 3 * Sigma		(Dark Grey - dotted)
+**		LSL				(Light Magenta)
+**		USL				(Light Magenta)
+**		Frequency Bars			(Light Green)
+**
+*/
+
+FUNCTION
+_SPCCpChartTask();
+
+        INT     i;
+        INT     iSamples;
+        INT     hPlot;
+        INT     iX1Coord, iY1Coord;
+        INT     iX2Coord, iY2Coord;
+        INT     iX1BoxCoord, iY1BoxCoord;
+        INT     iX2BoxCoord, iY2BoxCoord;
+	INT	iX12,iX22,iY12,iY22;
+
+        REAL    BoxWidth = 0.0;
+        REAL    XScaleFactor = 0.0;
+        REAL    YScaleFactor = 0.0;
+        STRING  sResolutionTemp;
+	REAL	xCoordInc;
+	REAL	xVal;
+	REAL	xValRange;
+	REAL	xValInc;
+	REAL    xValStart;
+	REAL    xValEnd;
+	REAL	xBoxOffset;
+	REAL	LSL;
+	REAL	USL;
+	REAL    xCoordMean;
+	REAL	xCoordUSL;
+	REAL	xCoordLSL;
+	REAL	xCoord3Sigp;
+	REAL	Temp;
+	REAL	BarFreqTotal;
+	REAL	BarFreqArea;
+	REAL    MaxValue     = 0.0;
+
+	Sleep(0);
+
+  	ErrSet(1);
+
+        _SPCPlotAreaSetUp(iBoxLength,iBoxHeight);
+
+        XDB = _SPCClientInfoGet(SPC_INFO_PROCESS_MEAN);
+        SigP = _SPCClientInfoGet(SPC_INFO_PROCESS_STDDEV);
+
+        PXDBValue =  _SPCCalculatePXDB(SigP);
+
+	xCoordInc = PlotAreaLength / 100.0;
+
+	LSL = _SPCClientInfoGet(SPC_INFO_LSL);
+	USL = _SPCClientInfoGet(SPC_INFO_USL);
+
+	IF Round(LSL,0) <> TrnGetInvalidValue() THEN 
+		xValStart  = LSL - SigP;
+		Temp       = XDB - 3.6 * SigP;
+		xValStart  = Min(xValStart,Temp);
+	ELSE
+		xValStart  = XDB - 3.6 * SigP;
+	END
+		
+
+	IF Round(USL,0) <> TrnGetInvalidValue() THEN	
+		xValEnd    = USL + SigP;
+		Temp 	   = XDB + 3.6 * SigP;
+		xValEnd    = Max(xValEnd,Temp);
+	ELSE
+		xValEnd    = XDB + 3.6 * SigP;
+	END
+
+	xValRange = xValEnd - xValStart;
+	xValInc   = xValRange / 100.0;
+
+	IF SigP <= 0 OR xValRange <= 0 THEN
+
+        	hPlot = PlotOpen(ghANPlot,"Display",1);
+		PlotClose(hPlot);
+		RETURN;
+	END
+        IF SPCNumberofBarsGet() > 2    THEN 
+		BoxWidth = (6.0 * SigP) / (SPCNumberofBarsGet() - 2);        
+        END
+ 
+	xBoxOffset = (XDB - (3 * SigP) - BoxWidth) - xValStart;
+
+	BarFreqTotal = _SPCBarFreqTotalGet();
+	BarFreqArea  = BarFreqTotal * BoxWidth;
+
+	_SPCNormalBarFreq(BarFreqArea);
+	
+	IF BarFreqArea > 0 THEN
+		MaxValue = GlobalMaxFreq / BarFreqArea;
+	END
+ 
+	IF MaxValue < PXDBValue THEN
+		MaxValue = PXDBValue;
+	END
+
+        IF MaxValue > 0  THEN 
+		YScaleFactor = PlotAreaHeight / MaxValue;
+        END
+
+        IF Sigp > 0 	THEN 
+        	XScaleFactor = PlotAreaLength / xValRange;                 
+	END
+
+        hPlot = PlotOpen(ghANPlot,"Display",1);
+
+        IF hPlot <> -1 THEN
+
+/* Plot Normal Distribution */
+
+        	iX1Coord = 0;
+        	iY1Coord = PlotAreaHeight - Round(_SPCCalculatePX(xValStart,XDB,SigP)* YScaleFactor,0);
+
+		xVal = xValStart;
+                FOR iSamples = 1 TO 100 DO
+
+			xVal = xVal + xValInc;
+                        iX2Coord = (iSamples * PlotAreaLength) / 100.0;
+                        iY2Coord = PlotAreaHeight - Round(_SPCCalculatePX(xVal,XDB,SigP)* YScaleFactor,0);
+
+                        IF bRotateCurve = 1 THEN
+                                PlotDraw(hPlot, 3, 0, White, 1, Transparent, iY1Coord, PlotAreaHeight - iX1Coord, iY2Coord, PlotAreaHeight - iX2Coord);
+                        ELSE
+                                PlotDraw(hPlot, 3, 0, White, 1, Transparent, iX1Coord, iY1Coord, iX2Coord, iY2Coord);
+                        END
+                        iX1Coord = iX2Coord;
+                        iY1Coord = iY2Coord;
+                END
+
+/* Plot Limits */
+                IF bRotateCurve = 1 THEN
+
+			xCoordMean = ((XDB - xValStart) * PlotAreaHeight) / xValRange;
+			PlotDraw(hPlot, 3, 0, Yellow, 1, Transparent, 0, Round(xCoordMean, 0), PlotAreaHeight, Round(xCoordMean, 0));
+
+                        xCoord3SigP  = ((XDB - 3.0 * SigP - xValStart) * PlotAreaHeight) / xValRange;
+			PlotDraw(hPlot, 3, 2, Dark_grey, 1, Transparent, 0, PlotAreaHeight - xCoord3SigP, PlotAreaHeight, PlotAreaHeight - xCoord3SigP);
+
+                        xCoord3SigP  = ((XDB + 3.0 * SigP - xValStart) * PlotAreaHeight) / xValRange;
+                        PlotDraw(hPlot, 3, 2, Dark_grey, 1, Transparent, 0, PlotAreaHeight - xCoord3SigP, PlotAreaHeight, PlotAreaHeight - xCoord3SigP);
+
+			IF Round(USL, 0) <> TrnGetInvalidValue() THEN
+                        	xCoordUSL  = ((USL - xValStart) * PlotAreaHeight) / xValRange;
+                        	PlotDraw(hPlot, 3, 0, Light_Magenta, 1, Transparent, 0, PlotAreaHeight - xCoordUSL, PlotAreaHeight, PlotAreaHeight - xCoordUSL);
+                        END
+
+			IF Round(LSL, 0) <> TrnGetInvalidValue() THEN
+        	                xCoordLSL  = ((LSL - xValStart) * PlotAreaHeight) / xValRange;
+	                        PlotDraw(hPlot, 3, 0, Light_Magenta, 1, Transparent, 0, PlotAreaHeight - xCoordLSL, PlotAreaHeight, PlotAreaHeight - xCoordLSL);
+			END
+
+                ELSE
+			xCoordMean = ((XDB - xValStart) * PlotAreaLength) / xValRange;
+                        PlotDraw(hPlot, 3, 0, Yellow, 1, Transparent, xCoordMean, 0, xCoordMean, PlotAreaHeight);
+
+                        xCoord3SigP  = ((XDB - 3.0 * SigP - xValStart) * PlotAreaLength) / xValRange;
+                        PlotDraw(hPlot, 3, 2, Dark_grey, 1, Transparent, xCoord3SigP, 0, xCoord3SigP, PlotAreaHeight);
+                        
+                        xCoord3SigP  = ((XDB + 3.0 * SigP - xValStart) * PlotAreaLength) / xValRange;
+                        PlotDraw(hPlot, 3, 2, Dark_grey, 1, Transparent, xCoord3SigP, 0, xCoord3SigP, PlotAreaHeight);
+
+			IF Round(USL, 0) <> TrnGetInvalidValue() THEN
+                	        xCoordUSL  = ((USL - xValStart) * PlotAreaLength) / xValRange;
+                       		PlotDraw(hPlot, 3, 0, Light_Magenta, 1, Transparent, xCoordUSL, 0, xCoordUSL, PlotAreaHeight);
+			END
+                        
+			IF Round(LSL, 0) <> TrnGetInvalidValue() THEN
+	                        xCoordLSL  = ((LSL - xValStart) * PlotAreaLength) / xValRange;
+        	                PlotDraw(hPlot, 3, 0, Light_Magenta, 1, Transparent, xCoordLSL, 0, xCoordLSL, PlotAreaHeight);
+			END
+                END
+
+/* Plot Histogram */
+                iX12 = PlotAreaHeight - Round(BarFreq[0]*YScaleFactor,0);
+                iY12 = PlotAreaHeight - Round(BoxWidth*XScaleFactor, 0);
+                iX22 = PlotAreaheight;
+                iY22 = PlotAreaHeight;
+
+                For i = 0 to (SPCNumberofBarsGet() - 1) do
+
+                        iX1BoxCoord = Round((xBoxOffset + i * BoxWidth) * XScaleFactor, 0);
+                        iY1BoxCoord = PlotAreaHeight - Round(BarFreq[i]*YScaleFactor,0);
+                        iX2BoxCoord = Round((xBoxOffset + (i+1) * Boxwidth) * XScaleFactor, 0);
+                        iY2BoxCoord = PlotAreaheight;
+
+                        IF bRotateCurve = 1 THEN
+                                iX12 = iY1BoxCoord;
+
+                                IF iY12 = iY22 THEN
+                                        iY12 = PlotAreaHeight - iX1BoxCoord - Round(Boxwidth*XScaleFactor, 0);
+                                END
+                                PlotDraw(hPlot, 1, 0, Light_green, 1, Transparent, iX12, iY12, iX22, iY22+1);
+                                iY22 = iY12;
+
+                        ELSE
+                                PlotDraw(hPlot, 1, 0, Light_green, 1, Transparent, iX1BoxCoord, iY1BoxCoord, iX2BoxCoord+1, iY2BoxCoord) ;
+                        END
+                END
+        END
+        PlotClose(hPLot);
+
+ 	ErrSet(0);
+END
+
+
+/*
+**      FUNCTION NAME:	_SPCPlotAreaSetUp
+**
+**      Sets up the screen area to plot the frequency histogram.
+**
+*/
+
+FUNCTION
+_SPCPlotAreaSetUp(INT iBoxLength, INT iBoxHeight)
+
+        IF PlotAreaLength <> iBoxLength AND PlotAreaHeight <> iBoxHeight THEN
+
+                PlotAreaHeight = iBoxHeight - 4;
+                PlotAreaLength = iBoxLength - 4;
+        END
+END
+
+
+/*
+**      FUNCTION NAME:	_SPCCalculatePXDB
+**
+**      Calculates the maximum value of the bell curve
+**      based on the sampled value being equal to the mean, thus the
+**      exponential term becomes 1, leaving the equation below.
+**
+*/
+
+REAL
+FUNCTION
+_SPCCalculatePXDB(REAL SigP)
+
+        REAL    PXDB;
+
+	IF SigP <> 0 THEN
+	        PXDB = 1 / (SigP*(Sqrt(2*pi)));
+	ELSE
+		PXDB = 0;
+	END
+
+        RETURN PXDB;
+END
+
+
+/*
+**      FUNCTION NAME:	_SPCCalculatePX
+**
+**      Generates the normal distribution (Bell curve).
+**
+*/
+
+REAL
+FUNCTION
+_SPCCalculatePX(REAL XVal, REAL XB, REAL SigP)
+
+        REAL    PX2;
+        REAL    PX1;
+        REAL    PX;
+
+	IF SigP <> 0 THEN
+	        PX2 = Pow(((XVal - XB)/SigP),2);
+	        PX1 = exp((-0.5*PX2));
+	        PX = PXDBValue * PX1;
+	ELSE
+		PXDBValue = 0;
+		PX = 0;
+	END
+
+        RETURN PX;
+END
+
+
+/*
+**      FUNCTION NAME:	CpChartRotateCurve
+**
+**	INVOCATION:	unused
+**
+**      Toggles the plot of the curve.
+**
+*/
+
+FUNCTION
+CpChartRotateCurve()
+
+	Toggle(bRotateCurve);
+END
+
+
+/*
+**      FUNCTION NAME:	CpChartRotated
+**
+**	INVOCATION:	unused
+**
+**      Returns the value of "RotateCurve"
+**
+*/
+
+INT
+FUNCTION
+CpChartRotated()
+
+        RETURN bRotateCurve;
+
+END
+
+
+/*
+**      FUNCTION NAME:	DspCpChartInfo
+**
+**	INVOCATION:	PgNum on SPCCp template.
+**
+**      Displays the values around the Cp Chart.
+**
+*/
+
+STRING
+FUNCTION
+DspCpChartInfo(INT iType = 0, INT nPlaces = 0)
+
+	REAL	Value = TrnGetInvalidValue();
+
+	IF TrnIsValidValue(SPCGlobalMaxFreqGet()) = 0 THEN
+		IF iType = 1 THEN Value = SPCGlobalMaxFreqGet();			END
+        	IF iType = 2 THEN Value = Round(SPCGlobalMaxFreqGet()/2,0);		END
+		IF iType = 3 THEN Value = SPCGlobalMaxFreqGet()*0;			END
+        	IF iType = 4 THEN Value = (XDB - 3*SigP);				END
+		IF iType = 5 THEN Value = _SPCClientInfoGet(SPC_INFO_PROCESS_MEAN);	END
+        	IF iType = 6 THEN Value = (XDB + 3*SigP);				END
+	END
+
+	RETURN SPCRealToStr(Value, SPC_DEFAULT_WIDTH, nPlaces);
+END
+
+
+/*****************************************************************/
+/**								**/
+/**		XRS page functions				**/
+/**								**/
+/*****************************************************************/
+/*
+**	FUNCTIONS:
+**
+**		SPCTimeSet
+**		_SPCTimeSet
+**		SPCDateSet
+**		_SPCDateSet
+**
+**		SPCXRSTimeBaseSet
+**		SPCTrnScroll
+**		SPCXRSTrendPenSelect
+**
+**		SPCSetEvent
+**
+******************************************************************/
+
+/*
+**	FUNCTION NAME:	SPCTimeSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCCp and SPCXRS template.
+**
+**	Sets the 0% time of the trend via a
+**	keypad form. This allows the user to view trend
+**	information up to the time entered.
+*/
+
+INT
+FUNCTION 
+SPCTimeSet(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sValue = "")
+
+	INT	iCurrent;
+
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		iCurrent = TrnGetTime(hANTrend1, 0, 0);
+		sValue = TimeToStr(iCurrent, 1);
+		sValue = FormNumPad("@(New Start Time)", sValue, (32+64+128));
+	END
+	IF IsError <> 299 THEN
+		_SPCTimeSet(hANTrend1, hANTrend2, hANTrend3, sValue);
+	END
+	
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SPCTimeSet
+**
+**	Set trend date/time from time
+*/
+
+FUNCTION 
+_SPCTimeSet(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sValue)
+
+	INT	iCurrent;
+	STRING	sTime;
+	STRING	sDate;
+	INT	iNew;
+	
+	iCurrent = TrnGetTime(hANTrend1, 0, 0);
+	sTime = sValue;
+	sDate = TimeToStr(iCurrent, 2);
+	iNew = StrToDate(sDate) + StrToTime(sTime);	
+	
+	IF (TrnSetTime(hAnTrend1, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+	IF (TrnSetTime(hAnTrend2, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+	IF (TrnSetTime(hAnTrend3, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+
+	_SPCDataUpdateNow(hANTrend1, TrnPageTypeSPCGet());
+	
+END
+
+
+/*
+**	FUNCTION NAME:	SPCDateSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCCp and SPCXRS templates.
+**
+**	Sets the 0% date of the trend. This allows the user
+**	to view trend information up to the date entered.
+*/
+
+INT
+FUNCTION 
+SPCDateSet(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sValue = "")
+
+	INT	iCurrent;
+
+	sValue = StrTrim( sValue );
+	IF sValue = "" THEN
+		iCurrent = TrnGetTime(hANTrend1, 0, 0);	
+		sValue = TimeToStr(iCurrent, 2);
+		sValue = FormNumPad("@(New Start Date)", sValue, (8));
+	END
+	IF IsError <> 299 THEN
+		_SPCDateSet(hANTrend1, hANTrend2, hANTrend3, sValue);
+	END
+	
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION NAME:	_SPCDateSet
+**
+**	Set trend date/time from date
+*/
+
+FUNCTION 
+_SPCDateSet(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sValue)
+
+	INT	iCurrent;
+	STRING	sTime;
+	STRING	sDate;
+	INT	iNew;
+
+	iCurrent = TrnGetTime(hANTrend1, 0, 0);	
+	sTime = TimeToStr(iCurrent, 1);
+	sDate = sValue;
+	iNew = StrToDate(sDate) + StrToTime(sTime);
+
+	IF (TrnSetTime(hAnTrend1, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+	IF (TrnSetTime(hAnTrend2, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+	IF (TrnSetTime(hAnTrend3, -1, iNew) = 274) THEN		// should be checking for all cases!
+		Prompt("Invalid Time/Date passed to TrnSetTime");
+	END
+
+	_SPCDataUpdateNow(hANTrend1, TrnPageTypeSPCGet());
+
+END
+
+
+/*
+**      FUNCTION NAME:	SPCXRSTimeBaseSet
+**
+**	INVOCATION:	PgKey or PgButton on SPCCp and SPCXRS templates.
+**
+**	Sets all three trends on the XRS page to the display period.
+**
+**
+*/
+
+FUNCTION
+SPCXRSTimeBaseSet(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING iArg = "")
+
+	IF iArg = "" THEN
+	        iArg = StrToTime(FormNumPad("@(New Resolution)", TimeToStr(TrnGetPeriod(hANTrend1), 5), 32));
+        ELSE 
+        	iArg = StrToTime(iArg);
+        END
+
+        TrendSetTimebase(hANTrend1, iArg);
+        TrendSetTimebase(hANTrend2, iArg);
+        TrendSetTimebase(hANTrend3, iArg);
+
+	_SPCDataUpdateNow(hANTrend1, TrnPageTypeSPCGet());
+
+END
+
+
+/*
+**      FUNCTION NAME:	SPCTrnScroll
+**
+**	INVOCATION:	PgButton on SPCCp and SPCXRS templates.
+**
+**      Used to allow the scrolling of 3 trends simultaneously
+**      situated at the corresponding AN's.
+**
+*/
+
+FUNCTION
+SPCTrnScroll(STRING hANTrend1, STRING hANTrend2, STRING hANTrend3, INT iPen, INT iPercent);
+
+        IF hANTrend2 = "" AND hANTrend3 = "" THEN
+                TrnScroll(StrToInt(hANTrend1), iPen, iPercent);
+        ELSE
+
+                TrnScroll(StrToInt(hANTrend1), iPen, iPercent);
+                TrnScroll(StrToInt(hANTrend2), iPen, iPercent);
+                TrnScroll(StrToInt(hANTrend3), iPen, iPercent);
+        END
+
+	_SPCDataUpdateNow(hANTrend1, TrnPageTypeSPCGet());
+END
+
+
+/*
+**	FUNCTION NAME:	SPCXRSTrendSelectPen()
+**
+**	INVOCATION:	PgButton on SPCCp and SPCXRS templates.
+**
+**	Allows the user to select any defined trend tag to be used as
+**      the current pen. This function is a modification of the "TrendSelectPen"
+**      function.
+**
+*/ 
+
+INT XRSSelectPenMode;
+
+FUNCTION
+SPCXRSTrendPenSelect(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sPen = "", INT hZoomAn = 0)
+
+	INT 	hForm;
+	STRING 	sTrendPenSelect;
+	STRING 	sComment;
+	STRING	sTemp;
+	STRING	sCluster;
+	
+	XRSSelectPenMode = 0;	/* Set global variable for Add/Delete operation */
+	
+	IF sPen <> "" THEN
+	        TrnSetPen(hANTrend1, -2, sPen);
+	ELSE
+	        IF ParameterGet("Trend", "TrendPenSelect", "0") = "0" THEN
+		        hForm = FormNew("@(Select Pen)", 53, 4, 24);  
+		        IF hForm <> -1 THEN
+			        sPen = TrnGetPen(hANTrend1, 0);
+			        sCluster = TrnGetCluster(hANTrend1);
+			        FormComboBox(0, 0, 52, 8, sPen);
+			        _FormGetAllTrendPens(sCluster, "NAME", 1);
+			        FormCheckBox(0, 1, "@(Select from Comments)", sTrendPenSelect);
+			        FormButton(11, 2, "@(Add,14,C)", _AddPen, 1);
+			        FormButton(28, 2,"@(Delete,14,C)", _DeletePen, 1);
+			        FormButton(11, 3, "@(OK,14,C)", 0, 1);
+			        FormButton(28, 3,"@(Cancel,14,C)", 0, 2);
+			        
+				IF FormRead(0) = 0 THEN
+			        	IF sTrendPenSelect = "1" THEN
+				        	ParameterPut("Trend", "TrendPenSelect", "1");
+			        	END
+			        	
+					_SPCSetPen(hANTrend1, hANTrend2, hANTrend3, sPen, hZoomAn);
+				END
+		        END
+	        ELSE
+		        hForm = FormNew("@(Select Pen)", 53, 4, 24);
+
+		        IF hForm <> -1 THEN
+		        	ErrSet(1);
+		        	sTemp = TrnGetPen(hANTrend1, 0);
+		        	ErrSet(0);
+				sComment = _FindCommentFromPen(sTemp);
+	
+				FormComboBox(0, 0, 52, 8, sComment);
+		        sCluster = TrnGetCluster(hANTrend1);
+				_FormGetAllTrendPens(sCluster,"COMMENT", 1);
+
+				FormCheckBox(0, 1, "@(Select from Tags)", sTrendPenSelect);
+				FormButton(11, 2, "@(Add,14,C)", _AddPen, 1);
+			        FormButton(28, 2,"@(Delete,14,C)", _DeletePen, 1);
+			        FormButton(11, 3, "@(OK,14,C)", 0, 1);
+			        FormButton(28, 3,"@(Cancel,14,C)", 0, 2);
+				IF FormRead(0) = 0 THEN
+					IF sTrendPenSelect = "1" THEN
+						ParameterPut("Trend", "TrendPenSelect", "0");
+			        	END
+
+					_SPCSetPen(hANTrend1, hANTrend2, hANTrend3, _FindPenFromComment(sComment,1), hZoomAn);
+				END
+			END
+		END
+	END
+
+	_SPCDataUpdateNow(hANTrend1, TrnPageTypeSPCGet());
+END
+
+FUNCTION
+_SPCSetPen(INT hANTrend1, INT hANTrend2, INT hANTrend3, STRING sPen, INT hZoomAn = 0)
+
+	IF hZoomAn <> 0 THEN
+		TrnSetPenFocus(hZoomAn, TrnGetPenFocus(hANTrend1));
+	END
+	
+	IF sPen <> "" THEN
+		
+		IF XRSSelectPenMode = 0 THEN
+			TrnSetPen(hANTrend1, 0, sPen);
+			TrnSetPen(hANTrend2, 0, sPen);
+			TrnSetPen(hANTrend3, 0, sPen);
+	
+			IF hZoomAn <> 0 THEN
+				TrnSetPen(hZoomAn, 0, sPen);
+			END
+		ELSE IF XRSSelectPenMode = 1 THEN
+			TrnSetPen(hANTrend1, -2, sPen);
+	                    TrnSetPen(hANTrend2, -2, sPen);
+	                    TrnSetPen(hANTrend3, -2, sPen);
+	
+			IF hZoomAn <> 0 THEN
+	      			TrnSetPen(hZoomAn, -2, sPen);
+			END
+		ELSE IF XRSSelectPenMode = 2 THEN
+			TrnSetPen(hANTrend1, 0, "!");
+	                    TrnSetPen(hANTrend2, 0, "!");
+	                    TrnSetPen(hANTrend3, 0, "!");
+	
+			TrnSetPenFocus(hANTrend1, -2);
+	
+			IF hZoomAn <> 0 THEN
+				TrnSetPen(hZoomAn, 0, "!");
+				TrnSetPenFocus(hZoomAn, -2);
+			END
+		END
+		END
+		END
+	END
+END
+
+/*
+**	FUNCTION:	SPCSetEvent
+**
+**	INVOCATION:	EventSPCXRS template.
+**
+**	This function sets the 0% event of the trend via a
+**	keypad form. This allows the user to view trend
+**	information up to the event entered.
+*/
+
+INT
+FUNCTION 
+SPCSetEvent(INT hTrendAN, INT hTrendAN2, INT hTrendAN3, STRING sValue = "")
+	INT	iCurrent;
+	sValue = StrTrim(sValue);
+	IF sValue = "" THEN
+		sValue = TrnGetEvent(hTrendAn, 0, 0);
+		sValue = FormNumPad("@(New End Event)", sValue, 0);
+	END
+	IF IsError() <> 299 THEN
+		TrnSetEvent(hTrendAN, 0, sValue);
+		TrnSetEvent(hTrendAN2, 0, sValue);
+		TrnSetEvent(hTrendAN3, 0, sValue);
+	END
+	
+	RETURN 0;
+END
+
+/*
+**	FUNCTION:	SPCXRSSyncCursors
+**
+**	INVOCATION:	EventSPCXRS & SPCXRSChart templates.
+**
+**	This function sets synchronises the position
+**	of the cursor on the 3 separate trends on the template.
+*/
+
+INT
+FUNCTION 
+SPCSyncCursors(INT hTrendAN1, INT hTrendAN2, INT hTrendAN3)
+	INT iPosCursor1, iPosCursor2, iPosCursor3;
+	
+	iPosCursor1 = TrnGetCursorPos(hTrendAN1);
+	iPosCursor2 = TrnGetCursorPos(hTrendAN2);
+	iPosCursor3 = TrnGetCursorPos(hTrendAN3);
+	
+	IF NOT((iPosCursor1 = -1) AND (iPosCursor2 = -1) AND (iPosCursor3 = -1)) THEN
+		IF iPosCursor1 = iPosCursor2 THEN
+			TrnSetCursorPos(hTrendAN1, iPosCursor3);
+			TrnSetCursorPos(hTrendAN2, iPosCursor3);
+		END
+		
+		IF iPosCursor2 = iPosCursor3 THEN
+			TrnSetCursorPos(hTrendAN2, iPosCursor1);
+			TrnSetCursorPos(hTrendAN3, iPosCursor1);
+		END
+		
+		IF iPosCursor3 = iPosCursor1 THEN
+			TrnSetCursorPos(hTrendAN3, iPosCursor2);
+			TrnSetCursorPos(hTrendAN1, iPosCursor2);
+		END
+	END
+	
+	RETURN 0;
+END

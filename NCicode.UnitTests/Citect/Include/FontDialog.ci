@@ -1,0 +1,136 @@
+STRING m_sFontName = "MS Sans Serif";
+STRING m_sFontAttribs = "";
+INT m_nFontSize = 0;
+/********************************************************************************************
+**      FILE:   FontDialog.ci
+**
+**      AUTHOR: Jacky Lang
+**
+**      DATE:   October 2000
+**
+**      REVISION:
+**
+**      FUNCTION:
+**              FontForm
+**
+**      NOTES:
+**              This function creates an interface form to change tool tip font and toggle 
+**              tool tip display at runtime.
+********************************************************************************************/
+FUNCTION FontForm()
+INT hForm;
+INT errRead;
+INT nTemp;
+STRING sBold;
+STRING sItalic;
+STRING sFontName;
+STRING sFontSize;
+STRING sUnderline;
+STRING sShowToolTips;
+
+	IF m_nFontSize = 0 THEN
+		FontDefault();
+	END
+        hForm = FormNew("@(Tool Tip Settings)", 31, 5, 25);
+    	FormPrompt(0 ,0, "@(Font Name):");
+    	FormComboBox(11 ,0, 20, 5, sFontName, 1);
+    	FormAddList("Arial");
+    	FormAddList("Courier");
+    	FormAddList("MS Sans Serif");
+    	FormAddList("Symbol");
+    	FormAddList("Terminal");
+    	FormAddList("Times New Roman");
+
+    	FormPrompt(15 ,1, "@(Size):");
+    	FormComboBox(20 ,1, 11, 5, sFontSize, 1);
+    	FormAddList("8");
+    	FormAddList("9");
+    	FormAddList("10");
+    	FormAddList("11");
+    	FormAddList("12");
+    	FormAddList("14");
+    	FormAddList("16");
+    	FormAddList("22");
+    	FormAddList("24");
+    	FormAddList("26");
+    	FormAddList("28");
+    	FormAddList("36");
+    	FormAddList("48");
+    	FormAddList("72");
+
+        FormCheckBox(0, 1, "@(Bold)", sBold);
+        FormCheckBox(0, 2, "@(Italic)", sItalic);
+        FormCheckBox(0, 3, "@(Underline)", sUnderline);
+        FormCheckBox(15, 3, "@(Show Tool Tips)", sShowToolTips);
+	FormButton(4, 4, "   @(OK)   ", 0, 1);
+	FormButton(19, 4, " @(Cancel) ", 0, 2);
+	IF StrSearch(0, m_sFontAttribs, "B") > -1 THEN
+		sBold = "1"
+	END
+	IF StrSearch(0, m_sFontAttribs, "I") > -1 THEN
+		sItalic = "1"; 
+	END
+	IF StrSearch(0, m_sFontAttribs, "U") > -1 THEN
+		sUnderline = "1"; 
+	END
+	sFontName = m_sFontName;
+	sShowToolTips = IntToStr(DspTipMode(3));
+	sFontSize = IntToStr(m_nFontSize);	
+ 	errRead = FormRead(0);
+	IF errRead = 0 Then
+		IF sFontName <> "" THEN
+			m_sFontName = sFontName;
+		ELSE
+			m_sFontName = "MS Sans Serif";
+		END
+		sShowToolTips = DspTipMode(StrToInt(sShowToolTips));
+		nTemp = StrToInt(sFontSize);
+		IF nTemp > 0 AND nTemp <= 72 THEN
+			m_nFontSize = nTemp;
+		END
+		m_sFontAttribs = "";
+		IF sBold = "1" THEN
+			m_sFontAttribs = m_sFontAttribs + "B";
+		END
+		IF sItalic = "1" THEN
+			m_sFontAttribs = m_sFontAttribs + "I";
+		END
+		IF sUnderline = "1" THEN
+			m_sFontAttribs = m_sFontAttribs + "U";
+		END
+		DspSetTooltipFont(m_sFontName, m_nFontSize, m_sFontAttribs);
+	END
+
+
+
+END
+
+FUNCTION FontDefault()
+STRING sFontSetting;
+STRING sTemp;
+INT nPos1;
+INT nPos2;
+INT nTemp;
+
+	m_nFontSize = 12;
+	sFontSetting = ParameterGet("Animator","ToolTipFont", "");
+	IF sFontSetting <> "" THEN
+		nPos1 = StrSearch(0, sFontSetting, ",");
+		IF nPos1 >= 0 THEN
+			sTemp = StrLeft(sFontSetting, nPos1);
+			IF sTemp <> "" THEN m_sFontName = sTemp; END
+			nPos2 = StrSearch(nPos1 + 1 , sFontSetting, ",");
+			IF nPos2 < nPos1 THEN nPos2 = StrLength(sFontSetting); END
+			IF nPos2 > nPos1 THEN
+				nTemp = StrToInt(StrMid(sFontSetting,nPos1 + 1,nPos2 - nPos1 -1));
+				IF nTemp > 0 AND nTemp <=72 THEN 
+					m_nFontSize = nTemp;
+				END
+				nPos1 = StrLength(sFontSetting);
+				m_sFontAttribs = StrRight(sFontSetting, nPos1 - nPos2 - 1);
+			END
+		ELSE
+		m_sFontName = sFontSetting;
+		END
+	END
+END

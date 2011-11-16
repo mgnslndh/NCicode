@@ -1,0 +1,796 @@
+//-----------------------------------------------------------------------------
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:		ItemList.ci
+//
+//	CREATED:	29/04/2009
+//
+//	AUTHOR:		Michael Yip
+//
+//	SUMMARY:
+//
+//		Contains related functions to create and manipulate multiple named item lists.
+//		Each named item list contains items where each stores integer value that
+//		can be used as handle to other user defined variable.
+//
+//	PUBLIC FUNCTIONS:
+//
+//		ItemListNew
+//		ItemListFree
+//		ItemListFreeAll
+//		ItemListIsValid
+//		ItemListFind
+//		ItemListName
+//		ItemListFirst
+//		ItemListLast
+//		ItemListNext
+//		
+//		ItemAdd
+//		ItemRemove
+//		ItemRemoveAll
+//		ItemIsValid
+//		ItemFind
+//		ItemValue
+//		ItemFirst
+//		ItemLast
+//		ItemNext
+//				
+// 	REMARKS: 
+//
+//		There are limits on the number of item lists or items supported.
+//
+//		Once an item list / item is created, its ID, returned by the provided
+//		functions, will not change until the item list / item is explicitly
+//		destroyed. This enables	the ID to be used as index to other user defined
+//		arrays.
+//
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+//
+//	Constants
+//
+//-----------------------------------------------------------------------------
+
+INT		c_ITEMLIST_MAX			= 64;		// Maximum number of Item lists allowed
+INT		c_ITEM_MAX				= 239;		// Maximum number of Item allowed in each Item list
+
+
+//-----------------------------------------------------------------------------
+//
+//	Module Variables
+//
+//-----------------------------------------------------------------------------
+
+INT		m_ItemList_LastIndex	= -1;		// Indicate the last index of Item list array
+INT		m_ItemList_FirstFree	= -1;		// Indicate the first free Item list. This var is only current after ItemListFind() is called
+STRING	m_ItemList_Name			[64];		// Each element in the array stores the name of an allocated Item list
+INT		m_ItemList_Size			[64];		// Each element in the array stores the allowable size of the list
+
+INT		m_Item_LastIndex		[64];		// Each element in the array stortes the last index for a particular Item array
+INT		m_Item_Value			[64][239];	// Each element in the array stores integer values which can be used as handles to customised Items
+
+
+//-----------------------------------------------------------------------------
+//
+//	Item Manipulation Related Functions
+//	(List of Item lists)
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListNew
+//
+//	SUMMARY:
+//		Create a new item list. If the name of the list already exist, the
+//		handle to the existing list will be returned
+//
+//	PARAMS:
+//		listName		- The name of list. All lists must have unique name
+//		size			- The size of the list to be created
+//	
+//	RETURNS: 
+//		The handle to the newly created list or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListNew(STRING listName, INT size = -1)
+	INT listID;
+
+	// a list name must be assigned
+	IF (listName = "") THEN
+		RETURN -1;
+	END
+
+	// List name must be unique. If list name is already in use, the existing list will be returned
+	listID = ItemListFind(listName);
+	IF listID < 0 THEN
+		listID = m_ItemList_FirstFree;
+		m_ItemList_Name[listID] = listName;
+		IF ((size < 0) OR (size > c_ITEM_MAX - 1)) THEN
+			m_ItemList_Size[listID] = c_ITEM_MAX;
+		ELSE
+			m_ItemList_Size[listID] = size;
+		END
+		m_Item_LastIndex[listID] = -1;				// clear contents of the new item list
+		IF (m_ItemList_FirstFree > m_ItemList_LastIndex) THEN
+			m_ItemList_LastIndex = m_ItemList_FirstFree;
+			IF (m_ItemList_FirstFree < c_ITEMLIST_MAX - 1) THEN
+				m_ItemList_FirstFree = m_ItemList_FirstFree + 1;
+			END
+		END
+	END	
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListFree
+//
+//	SUMMARY:
+//		Free the specified item list.
+//			
+//	PARAMS:
+//		listID			- The handle to the list
+//			
+//	RETURNS: 
+//		The handle of the freed list or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListFree(INT listID)
+	IF ((listID < 0) OR (listID > m_ItemList_LastIndex)) THEN
+		RETURN -1;
+	END
+	m_ItemList_Name[listID] = "";
+	m_Item_LastIndex[listID] = -1;				// clear contents of the new item list
+	IF (listID = m_ItemList_LastIndex) THEN
+		m_ItemList_LastIndex = listID - 1;
+	END
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListFreeAll
+//
+//	SUMMARY:
+//		Free all item lists.
+//			
+//	PARAMS:
+//		None
+//	
+//	RETURNS: 
+//		0 if successful or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListFreeAll()
+	INT listID;
+
+	listID = ItemListFirst();
+	WHILE (listID >= 0) DO
+		ItemListFree(listID);
+		listID = ItemListNext(listID);
+	END
+	RETURN 0;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListIsValid
+//
+//	SUMMARY:
+//		Check whether the specified list handle is valid.
+//
+//	PARAMS:
+//		listID			- The handle to the list
+//			
+//	RETURNS: 
+//		1 if the list is valid or 0 if is invalid
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListIsValid(INT listID)
+	INT isValid = 0;
+
+	IF ((listID >= 0) AND (listID <= m_ItemList_LastIndex)) THEN
+		IF (m_ItemList_Name[listID] <> "") THEN
+			isValid = 1;
+		END
+	END
+
+	RETURN isValid;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListFind
+//
+//	SUMMARY:
+//		Find the list handle by its name.
+//		
+//	PARAMS:
+//		listName		- The name of the list
+//			
+//	RETURNS:
+//		The handle of the found list or -1 if failed
+//
+//	REMARKS:
+//		When this function is called, it will also find the first free handle
+//		for a new list if no list has the specified name.
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListFind(STRING listName)
+	INT listID = 0;
+	INT listFree = -1;
+	INT loopEnd = 0;
+	
+	WHILE (0 = loopEnd) DO
+		IF (listID <= m_ItemList_LastIndex) THEN
+			IF (m_ItemList_Name[listID] <> listName) THEN
+				IF ((listFree < 0) AND ("" = m_ItemList_Name[listID])) THEN
+					m_ItemList_FirstFree = listID;
+					listFree = listID;
+				END
+				listID = listID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (0 = ItemListIsValid(listID)) THEN
+		IF (listFree < 0) THEN
+			IF (listID < c_ITEMLIST_MAX) THEN
+				m_ItemList_FirstFree = listID;
+			END
+		END
+		listID = -1;
+	END
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListName
+//
+//	SUMMARY:
+//		Get / set the name of the list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		newName		- (Optional) The new name for the list
+//			
+//	RETURNS:
+//		The name of the list or "" (empty string) if failed
+//
+//-----------------------------------------------------------------------------
+
+STRING FUNCTION ItemListName(INT listID, STRING newName = "")
+	STRING listName = "";
+
+	IF ItemListIsValid(listID) THEN
+		listName = m_ItemList_Name[listID];
+		IF ((newName <> listName) AND (newName <> "")) THEN
+			IF (ItemListFind(newName) < 0) THEN
+				m_ItemList_Name[listID] = newName;
+				listName = newName;
+			END
+		END
+	END
+	RETURN listName;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListFirst
+//
+//	SUMMARY:
+//		Return the hanlde to the first list allocated in the system.
+//		
+//	PARAMS:
+//		None
+//			
+//	RETURNS:
+//		The handle to the first list allocated or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListFirst()
+	INT listID = 0;
+	INT loopEnd = 0;
+
+	// Find the first allocated Item list
+	WHILE (0 = loopEnd) DO
+		IF (listID <= m_ItemList_LastIndex) THEN
+			IF (m_ItemList_Name[listID] = "") THEN
+				listID = listID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (listID > m_ItemList_LastIndex) THEN
+		listID = -1;
+	END
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListLast
+//
+//	SUMMARY:
+//		Return the handle to the last list allocated in the system.
+//		
+//	PARAMS:
+//		None
+//			
+//	RETURNS:
+//		The handle to the last list allocated or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListLast()
+	INT loopEnd = 0;
+	INT listID = m_ItemList_LastIndex;
+
+	// find the last allocated index
+	WHILE (0 = loopEnd) DO
+		IF (listID >= 0) THEN
+			IF (m_ItemList_Name[listID] = "") THEN
+				listID = listID - 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF listID < 0 THEN
+		listID = -1;
+	END
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemListNext
+//
+//	SUMMARY:
+//		Return the handle to the next list of the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//			
+//	RETURNS:
+//		The handle to the next list of the specified list or -1 if none found
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemListNext(INT listID)
+	INT loopEnd = 0;
+
+	listID = listID + 1;
+	IF ((listID < 0) OR (listID > m_ItemList_LastIndex)) THEN
+		RETURN -1;
+	END
+	// Find the next allocated Item list
+	WHILE (0 = loopEnd) DO
+		IF (listID <= m_ItemList_LastIndex) THEN
+			IF (m_ItemList_Name[listID] = "") THEN
+				listID = listID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (listID > m_ItemList_LastIndex) THEN
+		listID = -1;
+	END
+
+	RETURN listID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	Item Manipulation Related Functions
+//	(List of Items)
+//
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemAdd
+//
+//	SUMMARY:
+//		Add an item populated withe the specified integer value to the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		value		- The value of the added item (it must be > -1)
+//			
+//	RETURNS:
+//		The handle to the item of the specified list or -1 if failed
+//
+//	REMARKS:
+//		The integer value specified can be used to store handle / link to user-specified
+//		information.
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemAdd(INT listID, INT value)
+	INT itemID;
+	INT loopEnd = 0;
+
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+	IF (value < 0) THEN
+		RETURN -1;
+	END
+
+	// Find the first empty slot
+	itemID = 0;
+	WHILE (0 = loopEnd) DO
+		IF (itemID <= m_Item_LastIndex[listID]) THEN
+			IF (m_Item_Value[listID][itemID] > -1) THEN
+				itemID = itemID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (itemID < m_ItemList_Size[listID]) THEN
+		m_Item_Value[listID][itemID] = value;
+		IF (itemID > m_Item_LastIndex[listID]) THEN
+			m_Item_LastIndex[listID] = itemID;
+		END
+	ELSE
+		itemID = -1;
+	END
+
+	RETURN itemID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemRemove
+//
+//	SUMMARY:
+//		Remove a specified item from the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		itemID		- The handle to the item to be deleted
+//			
+//	RETURNS:
+//		The handle to the item deleted or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemRemove(INT listID, INT itemID)
+	IF (0 = ItemIsValid(listID, itemID)) THEN
+		RETURN -1;
+	END
+
+	m_Item_Value[listID][itemID] = -1;
+	IF (itemID = m_Item_LastIndex[listID]) THEN
+		m_Item_LastIndex[listID] = itemID - 1;
+	END
+	
+	RETURN itemID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemRemoveAll
+//
+//	SUMMARY:
+//		Remove alls items of the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//			
+//	RETURNS:
+//		0 if successful or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemRemoveAll(INT listID)
+	INT itemID;
+
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+
+	itemID = ItemFirst(listID);
+	WHILE (itemID >= 0) DO
+		ItemRemove(listID, itemID);
+		itemID = ItemNext(listID, itemID);
+	END
+	RETURN 0;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemIsValid
+//
+//	SUMMARY:
+//		Check whether an item is valid.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		itemID		- The handle to the item
+//			
+//	RETURNS:
+//		1 if item is valid or 0 if is invalid
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemIsValid(INT listID, INT itemID)
+	IF ItemListIsValid(listID) THEN
+		IF ((itemID >= 0) AND (itemID <= m_Item_LastIndex[listID])) THEN
+			IF (m_Item_Value[listID][itemID] > -1) THEN
+				RETURN 1;
+			END
+		END
+	END
+
+	RETURN 0;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemFind
+//
+//	SUMMARY:
+//		Find the first item int the specified list that contains the matching value.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		value		- The value to search for
+//			
+//	RETURNS:
+//		The handle to the first matched item in the list or -1 if cannot find
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemFind(INT listID, INT value)
+	INT itemID = 0;
+	INT loopEnd = 0;
+
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+
+	WHILE (0 = loopEnd) DO
+		IF (itemID <= m_Item_LastIndex[listID]) THEN
+			IF (m_Item_Value[listID][itemID] <> value) THEN
+				itemID = itemID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (itemID > m_Item_LastIndex[listID]) THEN
+		itemID = -1;
+	END
+
+	RETURN itemID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemValue
+//
+//	SUMMARY:
+//		Get / set the value of the item of the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		itemID		- The handle to the item
+//		value		- (Optional) New value to be set to the item
+//			
+//	RETURNS:
+//		The value of the item or -1 if failed
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemValue(INT listID, INT itemID, INT value = -1)
+	IF ItemIsValid(listID, itemID) THEN
+		IF (value >= 0) THEN
+			m_Item_Value[listID][itemID] = value;
+		ELSE
+			value = m_Item_Value[listID][itemID];
+		END
+		RETURN value;
+	END
+	RETURN -1;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemFirst
+//
+//	SUMMARY:
+//		Return the handle to the first item of the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//			
+//	RETURNS:
+//		The handle to the first item or -1 if cannot find
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemFirst(INT listID)
+	INT itemID = 0;
+	INT loopEnd = 0;
+
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+
+	// Find the first allocated Item
+	WHILE (0 = loopEnd) DO
+		IF (itemID <= m_Item_LastIndex[listID]) THEN
+			IF (m_Item_Value[listID][itemID] < 0) THEN
+				itemID = itemID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (itemID > m_Item_LastIndex[listID]) THEN
+		itemID = -1;
+	END
+
+	RETURN itemID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemLast
+//
+//	SUMMARY:
+//		Return the last item in the specified list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//			
+//	RETURNS:
+//		The handle to the last item in the list or -1 if cannot find
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemLast(INT listID)
+	INT loopEnd = 0;
+	INT itemID;
+
+	// Check whether specified Item List is valid
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+	itemID = m_Item_LastIndex[listID];
+
+	// find the last allocated index
+	WHILE (0 = loopEnd) DO
+		IF (itemID >= 0) THEN
+			IF (m_Item_Value[listID][itemID] < 0) THEN
+				itemID = itemID - 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF itemID < 0 THEN
+		itemID = -1;
+	END
+
+	RETURN itemID;
+END
+
+
+//-----------------------------------------------------------------------------
+//
+//	FUNCTION NAME:
+//		ItemNext
+//
+//	SUMMARY:
+//		Return the handle to the next item of the specified item in the list.
+//		
+//	PARAMS:
+//		listID		- The handle to the list
+//		itemID		- The handle to the current item
+//			
+//	RETURNS:
+//		The handle to the next item of the specified one or -1 if cannot find
+//
+//-----------------------------------------------------------------------------
+
+INT FUNCTION ItemNext(INT listID, INT itemID)
+	INT loopEnd = 0;
+
+	IF (0 = ItemListIsValid(listID)) THEN
+		RETURN -1;
+	END
+
+	itemID = itemID + 1;
+	IF ((itemID < 0) OR (itemID > m_Item_LastIndex[listID])) THEN
+		RETURN -1;
+	END
+	// Find the next allocated Item
+	WHILE (0 = loopEnd) DO
+		IF (itemID <= m_Item_LastIndex[listID]) THEN
+			IF (m_Item_Value[listID][itemID] < 0) THEN
+				itemID = itemID + 1;
+			ELSE
+				loopEnd = 1;
+			END
+		ELSE
+			loopEnd = 1;
+		END
+	END
+	IF (itemID > m_Item_LastIndex[listID]) THEN
+		itemID = -1;
+	END
+
+	RETURN itemID;
+END

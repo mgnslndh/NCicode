@@ -1,0 +1,99 @@
+/*
+**	FILE:	debug.ci
+**
+**	AUTHOR:	Kyle Dunsire
+**
+**	DATE:	June 1998
+**
+**	REVISION:
+**
+**	1.0	First revision for release 5.11.
+**
+**	NOTES:
+**
+**	1. This provides some extra functionality for in-line debugging of
+**      user Cicode.
+**
+*/
+
+/*
+**      Global variables.
+*/
+
+GLOBAL	INT	gbDebugEnable	= FALSE;	/* Initalised in _CitectBegin() */
+
+
+/*
+**	FUNCTION NAME:  DebugMsg
+**
+**	This function provides logging for user debugging purposes, which
+**	can be turned on or off at runtime.
+**
+**      The gbDebugEnable variable (initalised from the [Code]DebugMessage
+**	parameter at startup) is used to enable or disable logging.
+**
+*/
+
+FUNCTION
+DebugMsg(STRING sMessage)
+
+        IF gbDebugEnable THEN
+                TraceMsg(sMessage);
+		ErrLog(sMessage);
+        END
+
+END
+
+
+/*
+**	FUNCTION NAME:  DebugMsgSet
+**
+**	This function allows the user to toggle (on and off) at runtime
+**	the logging provided by the DebugMsg() and _Assert() functions - 
+**	through the gbDebugEnable variable.  It also sets/resets the 
+**	[Code]DebugMessage parameter appropriately in the Citect.INI.
+**
+*/
+
+INT
+FUNCTION
+DebugMsgSet(INT bSet)
+        INT     iResult;
+
+        iResult = ParameterPut("Code", "DebugMessage", bSet);
+        gbDebugEnable = bSet;
+
+        return iResult;
+
+END
+
+
+
+/*
+**	FUNCTION NAME:  _Assert
+**
+**	This function is called when a used defined assertion fails. It
+**      halts the current task and sets the Assertion error code.
+**
+**      The gbDebugEnable variable (initalised from the [Code]DebugMessage
+**	parameter at startup) controls if the assertion is logged.
+**	gbDebugEnable is set/reset through the DebugMsgSet() function.
+**
+*/
+
+FUNCTION
+_Assert(STRING sExp, STRING sFile, STRING sLine)
+	STRING	sMsg;
+
+	IF gbDebugEnable THEN
+		sMsg = Date(2) + " " + Time(1) + "  Assertion: '" + sExp +"'^nat line " + sLine + " in file " + sFile;
+		TraceMsg(sMsg);
+		ErrLog(sMsg);
+                Message("Assertion failed in user Cicode", sMsg, 48);
+	END
+
+	ErrSetHw(2, 347);
+	Halt();
+
+END
+

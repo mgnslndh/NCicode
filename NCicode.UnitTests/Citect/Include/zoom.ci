@@ -1,0 +1,1623 @@
+/*
+**	FILE: 	zoom.ci
+**	
+**	AUTHOR:	Greg Symington
+**	
+**	DATE:		October 1994
+**
+**	REVISION:
+**
+**	NOTES:
+**		These functions control the rubber
+**		band zoom\export capabilities on the
+**		standard trend pages. They also control
+**		the other zoom features on the default 
+**		trend pages.
+**
+**	FUNCTIONS:
+**			StartRubber
+**			EndRubber
+**			TrendZoomRub
+**			TrendZoom
+**			TrendZoomEffect
+**			TrendZoomRubEffect
+**			ExportClipButton
+**			ExportFileButton
+**			DspRubberCheckAreaSelected
+**			DspRubberRedraw
+**			
+**
+*/
+
+/* global defines */
+
+INT	TRN_PAGE_NORMAL		= 0; 
+INT	TRN_PAGE_COMPARE 	= 1;
+
+INT	MAX_COMPARE_PENS	= 4;
+INT	TREND_TYPE_PERIODIC	= 1;
+INT	TREND_TYPE_EVENT	= 2;
+INT	TREND_TYPE_PERIODIC_EVENT	= 3;
+
+INT DISPLAYMODE_INVALID_GATED_AS_IS = 1;
+INT	DISPLAYMODE_REVERSE_DATA		= 2;
+INT	DEFAULT_EXPORT_DISPLAYMODE		= 3; // DISPLAYMODE_INVALID_GATED_AS_IS BITOR DISPLAYMODE_REVERSE_DATA
+
+/************   GLOBAL VARIABLES	*************/
+
+INT 	RubX1, RubX2, RubY1, RubY2;
+
+INT	AreaSelected = 0;
+INT	SelectedAn = 0;
+INT	RealTimeFlag = 0;
+INT	ZoomEffectSteps;
+INT     ZoomEffectDelay;
+STRING	sTagArray[9];
+INT	hTagArray[8];
+INT	displayModeArray[8];
+
+
+/*
+** These variables MUST be defined globally as they
+** are passed by reference to the TrnGetDefScale 
+** function
+** They are used in the _ZoomScaleState function
+*/
+REAL	fOldMinScale;
+REAL	fOldMaxScale;
+REAL	nOldZeroScale;
+REAL	nOldFullScale;
+
+
+/*
+** Functions to return info about the trend dimensions 
+*/
+
+
+INT 
+FUNCTION 
+DspGetAnWidth(INT hAn) 
+	INT Top, Left, Bottom, Right;
+ 
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return (Right - Left); 
+END
+
+INT 
+FUNCTION 
+DspGetAnHeight(INT hAn) 
+	INT Top, Left, Bottom, Right;
+ 
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return (Bottom - Top); 
+END
+
+INT 
+FUNCTION 
+DspGetAnLeft(INT hAn) 
+	INT Top, Left, Bottom, Right;
+	
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return Left; 
+END
+
+INT 
+FUNCTION 
+DspGetAnTop(INT hAn)
+	INT Top, Left, Bottom, Right;
+	
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return Top;
+END 
+
+INT 
+FUNCTION 
+DspGetAnRight(INT hAn) 
+	INT Top, Left, Bottom, Right;
+	
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return Right; 
+END
+
+INT 
+FUNCTION 
+DspGetAnBottom(INT hAn)
+	INT Top, Left, Bottom, Right;
+	
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	
+	return Bottom;
+END 
+
+
+STRING
+FUNCTION
+_TrendPenNameGet(INT hAn, INT hPen)
+
+	STRING	sPen;
+	
+	ErrSet(1);
+	sPen = TrnGetPen(hAn,hPen,1);
+	ErrSet(0);
+
+	RETURN sPen;
+END
+
+
+INT
+FUNCTION
+_TrendGraphTypeGet(INT hAn)
+
+	STRING	sType;
+	INT 	nType = -1;
+	INT		nError;
+	
+	ErrSet(1);
+	sType = TrnClientInfo(hAn, 0, 2, 0, nError);
+	ErrSet(0);
+
+	IF sType <> "" THEN
+		nType = StrToInt(sType);
+	END
+
+	RETURN nType;
+END
+
+REAL
+FUNCTION
+_TrendDefPeriodGet(STRING sPen)
+
+	REAL	fPeriod = -1.0;
+	STRING	sPeriod;
+
+	IF sPen <> "" THEN
+		sPeriod = TrnInfo(sPen, 2);
+		IF sPeriod <> "" THEN
+			fPeriod = StrToReal(sPeriod);
+		END
+	END
+
+	RETURN fPeriod;
+END
+
+/*
+**	FUNCTION:	TrendStartRubber()
+**	
+**	Set clipping region and start the zoom 
+**	rubber band.
+**
+*/
+
+INT
+FUNCTION
+TrendStartRubber()
+
+	INT 	hAn;
+	INT 	Top;
+	INT	Left;
+	INT	Bottom;
+	INT	Right;
+	INT 	x;
+	INT	y;
+ 
+	hAn = TrendGetAn();
+	DspGetAnExtent(hAn, Top, Left, Bottom, Right);
+	DspRubSetClip(Left, Top, Right, Bottom);
+	DspGetMouse(x, y);
+	DspRubStart(x, y, 6);
+	RETURN 0;
+END
+
+
+/*
+**	FUNCTION:	TrendEndRubber()
+**
+**	Sets flag for rubber band selection made and
+**	sets source trend An.
+*/
+
+INT
+FUNCTION
+TrendEndRubber()
+
+	AreaSelected = 1;
+	SelectedAn = TrendGetAn();
+      	
+	return 0;
+END
+
+
+/*	FUNCTION:	TrnZoomRub()
+**
+**	Uses the extents set by the rubber band 
+**	functions to zoom in on the selected
+**	region.
+**
+*/
+
+FUNCTION
+TrendZoomRub(INT hAn, INT hDestAn)
+
+	INT	nTrendType;
+
+	DspRubEnd(RubX1, RubY1, RubX2, RubY2); 
+	
+	IF SelectedAn <> 0 THEN
+		hAn = SelectedAn;
+		SelectedAn = 0;
+	END	
+		
+	TrendRubZoomEffect(hAn, hDestAn);
+	
+	TrnEcho(hDestAn, 0);
+	nTrendType = _TrendGraphTypeGet(hAn);
+
+	IF nTrendType = TREND_TYPE_PERIODIC THEN
+		_TrendZoomTime(hAn, hDestAn);
+		_TrendZoomScale(hAn, hDestAn);	
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		_TrendZoomEvent(hAn, hDestAn);
+		_TrendZoomScale(hAn, hDestAn);	
+	END END
+	
+	TrnEcho(hDestAn, 1);
+	
+	AreaSelected = 0;
+END
+
+/*
+**	FUNCTION:	TrendZoom()
+**
+**	Accepts the magnification for the Time 
+**	and Scale axis as its arguments. Resizes the 
+**	trend in both axis as appropriate. Use values > 1
+**	eg 2.0 to zoom in and values less than 1 to 
+**	zoom out.
+**	Once a trend has been zoomed in once or more in
+**	a particular axis, zooming out will cause the 
+**	zoom to RESET to the original trend scaling for
+**	that axis. Works for zooming in and out.
+**
+**	Called by cicode attached to the zoom buttons in
+**	the SingleTrend template page
+*/
+
+INT
+FUNCTION
+TrendZoom(INT hAn, REAL TimeZoom, REAL ScaleZoom, INT hDestAn = 0)
+	
+	INT	nTags;
+	INT	nPen;
+	INT	nTrendType;
+        INT     ScaleState;
+        INT     TimeState;
+	STRING	sPen;
+	REAL	nDefaultPeriod = 0;
+	REAL	nTrnPeriod = 0.0;
+	REAL	nDeltaScale = 0.0;
+
+	TimeZoom = 1 / TimeZoom;
+	ScaleZoom = 1 / ScaleZoom;
+		
+	IF hDestAn = 0 THEN
+		hDestAn = hAn;
+	END                     
+
+	sPen = _TrendPenNameGet(hAn,0);
+	nDefaultPeriod = _TrendDefPeriodGet(sPen);	
+
+	// If the user has not drawn a rubber band or if he has pressed ZoomOut
+	IF AreaSelected = 0 OR (TimeZoom = 2 AND ScaleZoom = 2) THEN
+		AreaSelected = 0;
+		nTrnPeriod = TrnGetPeriod(hAn);
+		nDeltaScale = (TrnGetScale(hAn, 0, 100) - TrnGetScale(hAn, 0, 0));
+
+		TrnEcho(hAn, 0);
+		IF TimeZoom <> 0 AND nTrnPeriod <> 0 AND nDeltaScale <> 0 THEN
+			IF NOT RealTimeFlag THEN
+				RealTimeFlag = NOT TrnGetMode(hAn, 0);
+			END
+
+            TimeState  = _ZoomTimeState(hAn);
+			nTrendType = _TrendGraphTypeGet(hAn);
+			IF (nTrendType = TREND_TYPE_EVENT) THEN
+				IF 	(TimeState <= 0 AND TimeZoom < 1) OR
+					(TimeState >= 0 AND TimeZoom > 1) THEN
+
+					IF _CalcNewZoomPos(TimeZoom, TrnGetEvent(hAn, 0, 100), TrnGetEvent(hAn, 0, 0), 1) > TimeCurrent() THEN
+						TrnSetEvent(hAn, -1, TrnGetEvent(hAn, -1, 0));
+						TrnScroll(hAn, -1, 200);
+					ELSE
+						TrnSetEvent(hAn, -1, _CalcNewZoomPos(TimeZoom, TrnGetEvent(hAn, 0, 100), TrnGetEvent(hAn, 0, 0), 1));
+					END
+
+					TrnSetPeriod(hAn, TimeZoom * TrnGetPeriod(hAn));
+					TrendZoomEffect(hAn, TimeZoom, ScaleZoom);
+				ELSE IF 	(TimeState <= 0 AND TimeZoom > 1) OR
+						(TimeState > 0 AND TimeZoom < 1) THEN
+		
+					IF _CalcNewZoomPos(nDefaultPeriod / nTrnPeriod, TrnGetTime(hAn, 0, 100), TrnGetTime(hAn, 0, 0), 1) > TimeCurrent() THEN
+						TrnSetEvent(hAn, -1, TrnGetEvent(hAn, 0, 0));
+						TrnScroll(hAn, -1, 200);
+					ELSE
+				
+						TrnSetEvent(hAn, -1, _CalcNewZoomPos(nDefaultPeriod / nTrnPeriod,  
+								TrnGetEvent(hAn, 0, 100), 
+								TrnGetEvent(hAn, 0, 0),
+								1));
+					END
+					IF RealTimeFlag THEN
+						TrnSetEvent(hAn, -1, TrnGetEvent(hAn, 0, 0));
+						TrnScroll(hAn, -1, 200);
+						RealTimeFlag = 0;
+					END
+					
+					TrnGetDefScale(sPen, nOldZeroScale, nOldFullScale); 
+					TrendZoomEffect(hAn, nDefaultPeriod / nTrnPeriod, 
+						((nOldFullScale - nOldZeroScale) / nDeltaScale));
+
+					TrnSetPeriod(hAn, nDefaultPeriod);
+				END
+				END
+			ELSE IF (nTrendType = TREND_TYPE_PERIODIC) THEN
+			
+				IF 	(TimeState <= 0 AND TimeZoom < 1) OR
+					(TimeState >= 0 AND TimeZoom > 1) THEN
+	
+					IF _CalcNewZoomPos(TimeZoom, TrnGetTime(hAn, 0, 100), TrnGetTime(hAn, 0, 0), 1) > TimeCurrent() THEN
+						IF (TrnSetTime(hAn, -1, TimeCurrent()) = 274) THEN		// should be checking for all cases!
+							Prompt("Invalid Time/Date passed to TrnSetTime");
+						END
+						TrnScroll(hAn, -1, 100);
+						TrnSetSpan(hAn, TimeZoom * (TrnGetTime(hAn, 0, 0) - TrnGetTime(hAn, 0, 100)));
+					ELSE
+						IF (TrnSetTime(hAn, -1, _CalcNewZoomPos(TimeZoom, TrnGetTime(hAn, 0, 100), TrnGetTime(hAn, 0, 0), 1)) = 274) THEN		// should be checking for all cases!
+							Prompt("Invalid Time/Date passed to TrnSetTime");
+						END
+						TrnSetSpan(hAn, TimeZoom * (TrnGetTime(hAn, 0, 0) - TrnGetTime(hAn, 0, 100)));
+					END
+					TrendZoomEffect(hAn, TimeZoom, ScaleZoom);
+				ELSE IF 	(TimeState <= 0 AND TimeZoom > 1) OR
+						(TimeState > 0 AND TimeZoom < 1) THEN
+		
+					IF _CalcNewZoomPos(nDefaultPeriod / nTrnPeriod, TrnGetTime(hAn, 0, 100), TrnGetTime(hAn, 0, 0), 1) > TimeCurrent() THEN
+						IF (TrnSetTime(hAn, -1, TimeCurrent()) = 274) THEN		// should be checking for all cases!
+							Prompt("Invalid Time/Date passed to TrnSetTime");
+						END
+						TrnScroll(hAn, -1, 100);
+					ELSE
+						IF (TrnSetTime(hAn, -1, _CalcNewZoomPos(nDefaultPeriod / nTrnPeriod,  
+								TrnGetTime(hAn, 0, 100), 
+								TrnGetTime(hAn, 0, 0),
+								1)) = 274) THEN
+							Prompt("Invalid Time/Date passed to TrnSetTime");
+						END
+					END
+
+					IF RealTimeFlag THEN
+						IF (TrnSetTime(hAn, -1, TimeCurrent()) = 274) THEN		// should be checking for all cases!
+							Prompt("Invalid Time/Date passed to TrnSetTime");
+						END
+						TrnScroll(hAn, -1, 100);
+						RealTimeFlag = 0;
+					END
+					
+					TrnGetDefScale(sPen, nOldZeroScale, nOldFullScale); 
+					TrendZoomEffect(hAn, nDefaultPeriod / nTrnPeriod, 
+						((nOldFullScale - nOldZeroScale) / nDeltaScale));
+					TrnSetPeriod(hAn, nDefaultPeriod);
+				END
+				END
+			ELSE
+				// do nothing
+			END END
+		END
+	
+		IF ScaleZoom <> 0 THEN
+                        ScaleState = _ZoomScaleState(hAn);
+			IF 	(ScaleState <= 0 AND ScaleZoom < 1) OR
+				(ScaleState >= 0 AND ScaleZoom > 1) THEN
+		
+				nTags = _TrendAssignTagArray(hAn);
+				FOR nPen = 0 TO nTags-1 DO
+		
+					nOldZeroScale = TrnGetScale(hAn, hTagArray[nPen]+1, 0);
+					TrnSetScale(hAn, hTagArray[nPen]+1, 0, _CalcNewZoomPos(ScaleZoom, 
+								nOldZeroScale,
+								TrnGetScale(hAn, hTagArray[nPen]+1, 100),
+								0));
+					TrnSetScale(hAn, hTagArray[nPen]+1, 100, _CalcNewZoomPos(ScaleZoom,
+								nOldZeroScale,
+								TrnGetScale(hAn, hTagArray[nPen]+1, 100),
+								1));
+				END
+			ELSE IF 	(ScaleState <= 0 AND ScaleZoom > 1) OR
+					(ScaleState >= 0 AND ScaleZoom < 1) THEN
+
+				TrnSetScale(hAn, -1, -2, 0);
+	      		END
+	      		END
+		END
+		TrnEcho(hAn, 1);
+	
+	ELSE IF AreaSelected = 1 AND TimeZoom < 1 AND ScaleZoom < 1 THEN
+        		
+		TrendZoomRub(hAn, hDestAn);
+	END
+	END
+
+	TrendPenToolTip(hAn,0,0,0,0,0,0,0,0,2);  //****New Code line
+
+        return 0;
+END
+
+
+/*	FUNCTION:	_CalcNewZoomPos()
+**
+**	This function makes it possible to easily
+**	zoom to the centre of a defined area.
+**	Given 2 points and the scaling factor, it will
+**	return the new position of of the scaled point 
+**	specified by the mode.
+**	mode:
+**		mode 0: function will return new minimum limit
+**		mode 1: function will return new maximum limit
+**
+*/
+
+
+REAL
+FUNCTION
+_CalcNewZoomPos(REAL ScaleFactor, REAL MinVal, REAL MaxVal, INT Mode)
+
+REAL	nDelta;
+REAL	nNewVal;
+
+	nDelta = MaxVal - MinVal;
+	IF Mode = 0 THEN
+		nNewVal = MinVal + (nDelta * (1 - ScaleFactor) / 2);
+	ELSE 
+		nNewVal = MaxVal - (nDelta * (1 - ScaleFactor) / 2);
+	END
+	
+	return nNewVal;
+
+END
+
+
+/*
+**	FUNCTION:	_ZoomScaleState()
+**
+**	Checks the current trend scales then
+**	returns -1 if trend is currently zoomed in
+**	or 1 if trend is currently zoomed out.
+*/
+
+
+INT
+FUNCTION
+_ZoomScaleState(INT hAn)
+
+	REAL	fMinScale = 0.0;
+	REAL	fMaxScale = 0.0;
+	INT	status	  = -1;
+	STRING	sPen;
+
+	ErrSet(1);
+        sPen = _TrendPenNameGet(hAn, 0);
+	IF sPen <> "" THEN
+        	TrnGetDefScale(sPen, fOldMinScale, fOldMaxScale);
+
+        	fMinScale = TrnGetScale(hAn, 0, 0);
+        	fMaxScale = TrnGetScale(hAn, 0, 100);
+      
+		IF (fOldMaxScale - fOldMinScale) > (fMaxScale - fMinScale) THEN
+			status = -1;
+		ELSE IF (fOldMaxScale - fOldMinScale) < (fMaxScale - fMinScale) THEN
+			status = 1;
+		ELSE
+			status = 0;
+		END
+		END
+	END
+	ErrSet(0);
+		
+	return status;
+END	
+
+
+/*
+**	FUNCTION:	_ZoomTimeState()
+**
+**	Checks the current trend scales then
+**	returns -1 if trend is currently zoomed in
+**	or 1 if trend is currently zoomed out or 0
+**	if not zoomed.
+*/
+
+INT
+FUNCTION
+_ZoomTimeState(INT hAn)
+
+	INT	status;
+	REAL	fDefaultPeriod;
+	STRING	sPen;
+
+	sPen 	       = _TrendPenNameGet(hAn, 0);
+	fDefaultPeriod = _TrendDefPeriodGet(sPen);
+
+	IF (TrnGetPeriod(hAn) > fDefaultPeriod) THEN
+		return 1;
+	ELSE IF (TrnGetPeriod(hAn) < fDefaultPeriod) THEN
+		return -1;
+	ELSE
+		return 0;
+	END
+	END
+	
+END	
+
+
+/*
+**	FUNCTION:	_TrendZoomScale()
+**
+**	This function sets the scale of the given trend (hAn).
+**	It assumes that the Global rubber 
+**	band extent variables (RubX1, RubY1 etc) have
+**	been set to define the area within the trend
+**	to be enlarged.
+*/
+
+PRIVATE
+FUNCTION
+_TrendZoomScale(INT hAn, INT hDestAn)
+
+	INT	nPen;
+	INT	nTags;
+	REAL	nScaleMax;
+	REAL	nScaleMin;
+	
+	nTags = _TrendAssignTagArray(hAn);
+	FOR nPen = 0 TO nTags-1 DO
+		nScaleMin = TrnGetScale(hAn, hTagArray[nPen]+1, _TrendCalcPercent(RubY2, DspGetAnTop(hAn), DspGetAnHeight(hAn)));
+		nScaleMax = TrnGetScale(hAn, hTagArray[nPen]+1, _TrendCalcPercent(RubY1, DspGetAnTop(hAn), DspGetAnHeight(hAn)));
+		 
+		TrnSetScale(hDestAn, hTagArray[nPen]+1, 0, nScaleMin);
+		TrnSetScale(hDestAn, hTagArray[nPen]+1, 100, nScaleMax);
+	END
+END
+
+
+/*
+**	FUNCTION:	_TrendZoomTime()
+**
+**	This function sets the time of the given trend (hAn).
+**	It assumes that the Global rubber 
+**	band extent variables (RubX1, RubY1 etc) have
+**	been set to define the area within the trend
+**	to be enlarged.
+*/
+
+PRIVATE
+FUNCTION
+_TrendZoomTime(INT hAn, INT hDestAn)
+
+	INT	nStartTime = 0;
+	INT	nEndTime   = 0;
+	INT	nAnLeft	   = 0;
+	INT	nAnWidth   = 0;
+
+	nAnLeft  = DspGetAnLeft(hAn);
+	nAnWidth = DspGetAnWidth(hAn);
+
+	nStartTime = TrnGetTime(hAn, 0, _TrendCalcPercent(RubX1, nAnLeft, nAnWidth));
+	nEndTime   = TrnGetTime(hAn, 0, _TrendCalcPercent(RubX2, nAnLeft, nAnWidth));
+
+	IF nEndTime > nStartTime THEN
+  		TrnSetSpan(hDestAn, (nEndTime - nStartTime)); // call this before TrnSetTime to ensure historical mode is used after zooming
+		IF (TrnSetTime(hDestAn, -1, nEndTime) = 274) THEN		// should be checking for all cases!
+			Prompt("Invalid Time/Date passed to TrnSetTime");
+		END
+	END
+END
+
+
+/*
+**	FUNCTION:	_TrendZoomEvent()
+**
+**	This function sets the Event of the given trend (hAn).
+**	It assumes that the Global rubber 
+**	band extent variables (RubX1, RubY1 etc) have
+**	been set to define the area within the trend
+**	to be enlarged.
+*/
+
+PRIVATE
+FUNCTION
+_TrendZoomEvent(INT hAn, INT hDestAn)
+
+	REAL	nStartEvent = 0;
+	REAL	nEndEvent = 0;
+	REAL	nOldStartEvent = 0;
+	REAL	nOldEndEvent = 0;
+	REAL	nPeriod = 0;
+	REAL	Scale;
+	
+	nOldStartEvent = TrnGetEvent(hAn, 0, 100);
+	nOldEndEvent = TrnGetEvent(hAn, 0, 0);
+	nStartEvent = TrnGetEvent(hAn, 0, _TrendCalcPercent(RubX1, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+	nEndEvent = TrnGetEvent(hAn, 0, _TrendCalcPercent(RubX2, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+	nPeriod = TrnGetPeriod(hAn);
+
+	IF nStartEvent = 0 THEN
+		nStartEvent = 1;
+	END
+	
+	IF nEndEvent = 0 THEN
+		Message("@(Invalid Data)", "@(The selected Event data is Invalid)", 0);
+	ELSE
+		IF (nStartEvent - nEndEvent) <> 0 THEN
+			TrnSetEvent(hDestAn, -1, nEndEvent);
+  			TrnSetPeriod(hDestAn, nPeriod / ((nOldStartEvent - nOldEndEvent)/(nStartEvent - nEndEvent)));
+        	END
+	END
+END
+
+
+/*
+**	FUNCTION:	_TraceCalcPercent()
+**
+**	Calculates the percent of a value minus any offset
+**	compared to a third value. 
+**	eg _TraceCalcPercent(Value, XOffset, XWidth)
+**
+*/
+
+PRIVATE
+REAL
+FUNCTION
+_TrendCalcPercent(INT RawVal, INT MinVal, INT DeltaVal)
+
+	REAL	fTempVal = 0.0;
+	
+	IF DeltaVal > 0 THEN
+		fTempVal = (RawVal - MinVal) * 100 / DeltaVal;
+		fTempVal = 100 - fTempVal;
+	END
+		
+	IF fTempVal < 100 AND fTempVal > 0 THEN	
+	      	return fTempVal;
+	ELSE
+      		return 0;
+      END
+END  
+
+/*
+**	FUNCTION: TrendZoomEffect()
+**
+**	uses the rubber band to give a graphical 'zooming' 
+**	appearance when a normal zoom is executed.
+**
+*/
+
+FUNCTION
+TrendZoomEffect(INT hAn, REAL TimeZoom, REAL ScaleZoom)
+
+	INT	AX1, AX2, AY1, AY2;
+	INT	BX1, BX2, BY1, BY2;
+	
+	
+	IF ScaleZoom < 1 THEN
+		DspGetAnExtent(hAn, BY1, BX1, BY2, BX2);
+	      AX1 = _CalcNewZoomPos(ScaleZoom, BX1, BX2, 0);
+	      AX2 = _CalcNewZoomPos(ScaleZoom, BX1, BX2, 1);
+	      AY1 = _CalcNewZoomPos(TimeZoom, BY1, BY2, 0);
+	      AY2 = _CalcNewZoomPos(TimeZoom, BY1, BY2, 1);
+	        
+		_ZoomBox(AX1, AY1, AX2, AY2, BX1, BY1, BX2, BY2, ZoomEffectSteps);
+	END
+	
+	IF ScaleZoom > 1 THEN
+ 		TimeZoom = 1 / TimeZoom;
+		ScaleZoom = 1 / ScaleZoom;
+
+		DspGetAnExtent(hAn, AY1, AX1, AY2, AX2);
+	      BX1 = _CalcNewZoomPos(ScaleZoom, AX1, AX2, 0);
+	      BX2 = _CalcNewZoomPos(ScaleZoom, AX1, AX2, 1);
+	      BY1 = _CalcNewZoomPos(TimeZoom, AY1, AY2, 0);
+	      BY2 = _CalcNewZoomPos(TimeZoom, AY1, AY2, 1);
+	        
+		_ZoomBox(AX1, AY1, AX2, AY2, BX1, BY1, BX2, BY2, ZoomEffectSteps);
+	END
+	
+
+END
+
+
+/*
+**	FUNCTION: TrendRubZoomEffect()
+**
+**	uses the rubber band to give a graphical 'zooming' 
+**	appearance when the rber band is used to select the
+**	zoom region.
+**
+*/
+
+FUNCTION
+TrendRubZoomEffect(INT hStartAn, INT hEndAn)
+
+	INT	AX1, AX2, AY1, AY2;
+	INT	BX1, BX2, BY1, BY2;
+	
+	IF hStartAn = 0 THEN
+		DspGetAnExtent(hStartAn, AY1, AX1, AY2, AX2);
+	ELSE
+		AY1 = RubY1;
+		AX1 = RubX1;
+		AY2 = RubY2;
+		AX2 = RubX2;
+	END
+	DspGetAnExtent(hEndAn, BY1, BX1, BY2, BX2);
+	_ZoomBox(AX1, AY1, AX2, AY2, BX1, BY1, BX2, BY2, ZoomEffectSteps);
+
+END
+
+
+/*
+**	FUNCTION:	TrendZoomInit()
+**
+**	reads global values fron the citect.ini file.
+**
+*/
+
+FUNCTION
+TrendZoomInit()
+
+	ZoomEffectSteps = StrToInt(ParameterGet("Trend", "ZoomEffectSteps", "20"));
+	ZoomEffectDelay = StrToInt(ParameterGet("Trend", "ZoomEffectDelay", "2"));
+END
+
+/*
+**	FUNCTION:	_ZoomBox()
+**	
+**	uses the rubber band to give a graphical representation of 'zooming'.
+**
+*/
+
+FUNCTION
+_ZoomBox(INT AX1, INT AY1, INT AX2, INT AY2, INT BX1, INT BY1, INT BX2, INT BY2, REAL Segments)
+
+	INT i;
+	INT X1, X2, Y1, Y2;
+	REAL Scale;
+	
+	DspRubEnd(X1, Y1, X2, Y2);
+		
+	FOR i = 0 TO Segments DO
+		Scale = i / Segments;
+		DspRubStart(_CalcStep(AX1, BX1, Scale), _CalcStep(AY1, BY1, Scale), 0);
+		DspRubMove(_CalcStep(AX2, BX2, Scale), _CalcStep(AY2, BY2, Scale));
+
+		SleepMS(ZoomEffectDelay);
+      	END
+	DspRubEnd(X1, Y1, X2, Y2);
+END
+
+PRIVATE
+INT
+FUNCTION
+_CalcStep(INT First, INT Last, REAL Scale)
+
+	return (First + ((Last - First) * Scale));
+END
+
+/*
+**	FUNCTION:	ExportClipButton
+**
+**	Uses the extents set by the rubber band 
+**	functions to export selected data on the 
+**	trend to the clipboard in Csv format.
+**	If no extents are set, all data currently
+**	displayed, will be exported. 
+**
+*/
+
+FUNCTION
+ExportClipButton(INT hAn)
+
+	INT	nMode = 1;
+	INT	nClipMode = 2;
+	INT	nSamples;
+	INT	nStart = 0;
+	INT	nEnd = 0;
+	REAL	fPeriod = 0;
+	INT iPen;
+	
+	DspRubEnd(RubX1, RubY1, RubX2, RubY2);
+	nStart = _TrendZoomGetStart(hAn);
+	nEnd = _TrendZoomGetEnd(hAn);
+	ErrSet(1);
+	fPeriod = TrnGetPeriod(hAn);
+	ErrSet(0);
+	AreaSelected = 0;	
+	nSamples = _TrendZoomGetSamples(hAn, nEnd, nStart, fPeriod, -1, 1);
+  	
+	ErrSet(1);
+   	FOR iPen = 0 TO 7 DO
+   		sTagArray[iPen] = _TrendPenNameGet(hAn, iPen + 1);
+   		IF (StrLength(sTagArray[iPen]) <> 0) THEN
+   			displayModeArray[iPen] = TrnGetDisplayMode(hAn, iPen + 1) BITOR DISPLAYMODE_INVALID_GATED_AS_IS;
+   			displayModeArray[iPen] = displayModeArray[iPen] BITOR DISPLAYMODE_REVERSE_DATA;
+   		ELSE
+   		    displayModeArray[iPen] = DEFAULT_EXPORT_DISPLAYMODE;
+   		END
+   	END
+	ErrSet(0);
+		
+	nSamples = TrnExportClip(nEnd, fPeriod, nSamples, nMode, nClipMode, 
+				sTagArray[0], sTagArray[1], sTagArray[2], sTagArray[3], 
+				sTagArray[4], sTagArray[5], sTagArray[6], sTagArray[7],
+				displayModeArray[0], displayModeArray[1], displayModeArray[2], displayModeArray[3],
+				displayModeArray[4], displayModeArray[5], displayModeArray[6], displayModeArray[7]);
+END
+	
+INT
+FUNCTION
+_TrendZoomGetStart(INT hAn,INT nTrendType = -1)
+
+	INT	nStart;
+
+	IF nTrendType = -1 THEN
+		nTrendType = _TrendGraphTypeGet(hAn);
+	END
+
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		IF AreaSelected = 1 THEN
+			nStart = TrnGetTime(hAn, 0, _TrendCalcPercent(RubX1, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+		ELSE
+			nStart = TrnGetTime(hAn, 0, 100);
+		END
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		IF AreaSelected = 1 THEN
+			nStart = TrnGetEvent(hAn, 0, _TrendCalcPercent(RubX1, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+		ELSE
+			nStart = TrnGetEvent(hAn, 0, 100);
+			IF nStart = 0 THEN
+				nStart = 1;
+			END
+		END
+	ELSE 
+		nStart = 0;
+	END END
+	
+	RETURN nStart;
+END
+
+
+INT
+FUNCTION
+_TrendZoomGetEnd(INT hAn,INT nTrendType = -1)
+
+	INT	nEnd;
+
+	IF nTrendType = -1 THEN
+		nTrendType = _TrendGraphTypeGet(hAn);
+	END
+
+
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		IF AreaSelected = 1 THEN
+			nEnd = TrnGetTime(hAn, 0, _TrendCalcPercent(RubX2, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+		ELSE
+			nEnd = TrnGetTime(hAn, 0, 0);
+		END
+
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		IF AreaSelected = 1 THEN
+			nEnd = TrnGetEvent(hAn, 0, _TrendCalcPercent(RubX2, DspGetAnLeft(hAn), DspGetAnWidth(hAn)));
+		ELSE
+			nEnd = TrnGetEvent(hAn, 0, 0);
+			IF nEnd = 0 THEN
+				nEnd = 1;
+			END
+		END
+
+	ELSE 
+		nend = 0; 
+	
+	END END
+	
+	RETURN nEnd;
+END
+
+
+INT
+FUNCTION
+_TrendZoomGetSamples(INT hAn, INT nEnd, INT nStart, REAL fPeriod, INT nTrendType = -1, INT TrnPrinting = 0)
+
+	INT 	nSamples;
+	STRING	sPen;
+
+	sPen = _TrendPenNameGet(hAn, 0);
+	IF nTrendType = -1 THEN
+		nTrendType = _TrendGraphTypeGet(hAn);
+	END
+
+	IF nTrendType = TREND_TYPE_EVENT THEN
+		nSamples = (nEnd - nStart) + 1;
+	ELSE IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		nSamples = (nEnd - nStart) / fPeriod + 1;
+	
+	ELSE
+		nSamples = 0;
+	END END
+	
+	RETURN nSamples;
+END
+
+
+/*
+**	FUNCTION:	ExportFileButton()
+**
+**	Uses the extents set by the rubber band 
+**	functions to export selected data on the 
+**	trend to a file.
+**	If the file name given has a .dbf extension
+**	dbase III format will be used, otherwise
+**	Csv text format will be used. 
+**
+*/
+
+FUNCTION
+ExportFileButton(INT hAn)
+
+	STRING	sFile = "";
+	STRING	sExt;
+	      
+	INT	iPen;
+	INT	nMode = 1;
+	INT	nSamples;
+	INT	nError = 0;
+	INT	nStart = 0;
+	INT	nEnd = 0;
+	REAL	fPeriod = 0;
+	
+	sFile = ParameterGet("General", "ExportFile", "");
+	IF sFile = "" THEN
+		sFile = ParameterGet("CTEDIT", "Data", "") + "\*.dbf";
+	END	
+	
+	sFile = FormSaveAsFile("Save As", sFile, "DBase III (*.dbf)|*.dbf|Csv Files (*.csv)|*.csv|Text Files (*.txt)|*.txt|All Files (*.*)|*.*|");
+      
+	ParameterPut("General", "ExportFile", sFile);
+	
+      	IF sFile <> "" THEN
+
+		DspRubEnd(RubX1, RubY1, RubX2, RubY2);
+		nStart = _TrendZoomGetStart(hAn);
+		nEnd = _TrendZoomGetEnd(hAn);
+		fPeriod = TrnGetPeriod(hAn);
+		AreaSelected = 0;	
+		nSamples = _TrendZoomGetSamples(hAn, nEnd, nStart, fPeriod, -1, 1);   
+	
+		ErrSet(1);
+	   	FOR iPen = 0 TO 7 DO
+	   		sTagArray[iPen] = _TrendPenNameGet(hAn, iPen + 1);
+	   		IF (StrLength(sTagArray[iPen]) <> 0) THEN
+	   			displayModeArray[iPen] = TrnGetDisplayMode(hAn, iPen + 1) BITOR DISPLAYMODE_INVALID_GATED_AS_IS;
+   				displayModeArray[iPen] = displayModeArray[iPen] BITOR DISPLAYMODE_REVERSE_DATA;
+	   		ELSE
+	   		    displayModeArray[iPen] = DEFAULT_EXPORT_DISPLAYMODE;
+	   		END
+	   	END
+		ErrSet(0);
+
+  		sExt = StrLower(StrRight(sFile,4));
+   		IF sExt = ".dbf" THEN
+			nError = TrnExportDbf(sFile, nEnd, fPeriod, nSamples, nMode, 
+				sTagArray[0], sTagArray[1], sTagArray[2], sTagArray[3], 
+				sTagArray[4], sTagArray[5], sTagArray[6], sTagArray[7],
+				displayModeArray[0], displayModeArray[1], displayModeArray[2], displayModeArray[3],
+				displayModeArray[4], displayModeArray[5], displayModeArray[6], displayModeArray[7]);
+           	ELSE
+           		nError = TrnExportCsv(sFile, nEnd, fPeriod, nSamples, nMode, 
+				sTagArray[0], sTagArray[1], sTagArray[2], sTagArray[3], 
+				sTagArray[4], sTagArray[5], sTagArray[6], sTagArray[7],
+				displayModeArray[0], displayModeArray[1], displayModeArray[2], displayModeArray[3],
+				displayModeArray[4], displayModeArray[5], displayModeArray[6], displayModeArray[7]);
+		END
+	END 	 
+	IF nError <> 0 THEN
+		ErrSetHw(0, nError);	/* used generic device so debugger not invoked GS. */
+	END
+END
+
+
+/*
+**	FUNCTION NAME:	TrnPrint
+**
+**	This function will print out a Trend screen. The An of the  trend
+**	must be specified. If sPrinter parameter is an empty string then
+**	the parameter [GENERAL]TrnPrinter will be used. If sTitle is an
+**	empty string then the page Title will be used. For no title 
+**	pass " " for the sTitle argument.
+**
+*/
+
+INT	PRINT_MODE_UNKNOWN	= -1;
+INT	PRINT_MODE_B_AND_W	= 0;
+INT	PRINT_MODE_COLOUR	= 1;
+
+INT	DISPLAY_FORM_DEFAULT	= -1;	/* show form depending on .ini setting 	*/
+INT	DISPLAY_FORM_NO		= 0;	/* don't show form 			*/
+INT	DISPLAY_FORM_YES	= 1;	/* always show form			*/
+
+STRING	sPrintSetup;
+
+INT	iScaleIndex[8];
+
+
+INT
+FUNCTION
+TrnPrint(STRING sPrinter, STRING sTitle, INT hAn, INT ModeColour = PRINT_MODE_UNKNOWN, 
+		INT DisplayForm = DISPLAY_FORM_DEFAULT)
+
+	INT	iPen;
+	INT	nStart;
+	INT	nEnd1;
+	INT	nEnd2;
+	REAL	fPeriod1;
+	REAL	fPeriod2;
+	INT	nSamples;
+	INT 	status 		= 0;
+	STRING	sColour		= "0";
+	STRING	sBAndW		= "0";
+        STRING  sGeneral        = "GENERAL";
+        STRING  sTrnPrn         = "TrnPrinter";
+        STRING  sPrnColMode     = "PrinterColourMode";
+        STRING  sPrnPlotForm	= "DisablePlotSetupForm";
+	STRING	sComment	= "";
+        STRING  sBuf            = "";
+        STRING  sDisableForm	= "";
+
+	INT	i;
+
+	IF _TrendAssignTagArray(hAn) = 0 THEN
+		RETURN 301;		
+	END
+
+	IF ModeColour = PRINT_MODE_UNKNOWN THEN
+		ModeColour = StrToInt(ParameterGet(sGeneral,sPrnColMode,IntToStr(PRINT_MODE_B_AND_W)));
+	END
+
+	IF sPrinter = "" THEN
+		sPrintSetup = ParameterGet(sGeneral,sTrnPrn, "");
+	ELSE
+		sPrintSetup = sPrinter;
+	END
+
+	IF sTitle = "" THEN
+		sTitle = PageInfo(2);
+	END
+	IF sTitle = "" THEN
+		sTitle = "Trend Plot";
+	END
+
+	IF ModeColour = PRINT_MODE_COLOUR THEN
+		sColour = "1";
+	ELSE
+		sBAndW  = "1";
+	END
+
+	sDisableForm = ParameterGet(sGeneral,sPrnPlotForm, "0");
+
+	IF DisplayForm = DISPLAY_FORM_YES OR
+	  (DisplayForm = DISPLAY_FORM_DEFAULT AND	
+		(sDisableForm = "0" OR ModeColour = PRINT_MODE_UNKNOWN)) THEN
+
+		FormNew("@(Plot Setup)",61,6,1);
+
+		FormPrompt(0, 0, "@(Title)");
+		FormPrompt(0, 1, "@(Comment)");
+		FormEdit(9, 0, sTitle, 30);
+		FormEdit(9, 1, sComment, 30);
+
+		FormGroupBox(0, 2, 39, 4);
+		FormRadioButton(4,3,"&" + "@(Black and white)",sBAndW);
+		FormRadioButton(4,4,"&" + "@(Colour)",sColour);
+		FormPrompt(1, 2, " " + "@(Select colour)");
+
+		FormButton(41, 0, " &" + "@(Printer Setup)" + "... ", _PrinterSetup, 0);
+
+		FormField(41,3,20,1,5,sBuf,"&" + "@(OK)",0);
+		FormField(41,4,20,1,6,sBuf,"&" + "@(Cancel)",0);
+
+		FormCheckBox(4,5,"&" + "@(Do not display this form next time)",sDisableForm);
+
+		IF FormRead(0) = 0 THEN
+			sPrinter = sPrintSetup;
+		
+	                IF sColour = "1" THEN
+				ModeColour = PRINT_MODE_COLOUR;
+			ELSE
+				ModeColour = PRINT_MODE_B_AND_W;
+			END
+        	        ParameterPut(sGeneral,sPrnColMode,StrToInt(ModeColour));
+	                ParameterPut(sGeneral,sPrnPlotForm,sDisableForm);
+		ELSE
+			RETURN 1;
+		END
+	END
+
+	IF sPrintSetup = "" THEN 
+		sPrintSetup = FormSelectPrinter();
+	END
+	ParameterPut(sGeneral,sTrnPrn, sPrintSetup);
+
+      	IF sPrintSetup <> "" THEN
+
+		DspRubEnd(RubX1, RubY1, RubX2, RubY2);
+
+
+		nStart = _TrendZoomGetStart(hAn);
+		nEnd1 = _TrendZoomGetEnd(hAn);
+		IF nEnd1 = 0 OR nStart = 0 OR nStart = nEnd1 THEN
+			AreaSelected = 0;
+			nStart = _TrendZoomGetStart(hAn);
+			nEnd1 = _TrendZoomGetEnd(hAn);
+		END
+		fPeriod1 = TrnGetPeriod(hAn);
+		AreaSelected = 0;	
+		nSamples = _TrendZoomGetSamples(hAn, nEnd1, nStart, fPeriod1, -1, 1);
+
+		TrnPageAnSet(hAn);
+		IF TrnPageTypeSPCGet() THEN
+			status = SPCPlot(sPrintSetup, hAn, sTitle, sComment, ModeColour);
+		ELSE 
+			IF TrnPageTypeGet() = TRN_PAGE_COMPARE THEN
+
+				nEnd2 = _TrendZoomGetEnd(hAn+1);
+				fPeriod2 = TrnGetPeriod(hAn+1);
+
+				ErrSet(1);
+				FOR iPen = 0 TO MAX_COMPARE_PENS-1 DO
+					sTagArray[iPen] = _TrendPenNameGet(hAn, iPen+1);
+					sTagArray[iPen+MAX_COMPARE_PENS] = _TrendPenNameGet(hAn+1, iPen+1);
+				END
+				ErrSet(0);
+
+				status = TrnComparePlot(sPrintSetup,sTitle,hAn,sComment,ModeColour,nSamples,nEnd1,fPeriod1,nEnd2,fPeriod2,
+						sTagArray[0],sTagArray[1],sTagArray[2],sTagArray[3],
+						sTagArray[4],sTagArray[5],sTagArray[6],sTagArray[7],
+						TrnGetScale(hAn, 1, 0), TrnGetScale(hAn, 1, 100),
+						TrnGetScale(hAn, 2, 0), TrnGetScale(hAn, 2, 100),
+						TrnGetScale(hAn, 3, 0), TrnGetScale(hAn, 3, 100),
+						TrnGetScale(hAn, 4, 0),	TrnGetScale(hAn, 4, 100),
+						TrnGetScale(hAn+1, 1, 0), TrnGetScale(hAn+1, 1, 100),
+						TrnGetScale(hAn+1, 2, 0), TrnGetScale(hAn+1, 2, 100),
+						TrnGetScale(hAn+1, 3, 0), TrnGetScale(hAn+1, 3, 100),
+						TrnGetScale(hAn+1, 4, 0), TrnGetScale(hAn+1, 4, 100)
+						);
+			ELSE
+			FOR i = 0 to 7 DO
+				iScaleIndex[i] = hTagArray[i] + 1;
+				IF (iScaleIndex[i] > 8) THEN
+					iScaleIndex[i] = 8;	// this should actually be no trend pen...
+				END
+			END
+				status = TrnPlot(sPrintSetup,nSamples,nEnd1,fPeriod1,sTitle,hAn,
+						sTagArray[hTagArray[0]],sTagArray[hTagArray[1]],sTagArray[hTagArray[2]],sTagArray[hTagArray[3]],
+						sTagArray[hTagArray[4]],sTagArray[hTagArray[5]],sTagArray[hTagArray[6]],sTagArray[hTagArray[7]],
+						ModeColour, sComment,
+						TrnGetScale(hAn, iScaleIndex[0], 0), TrnGetScale(hAn, iScaleIndex[0], 100),
+						TrnGetScale(hAn, iScaleIndex[1], 0), TrnGetScale(hAn, iScaleIndex[1], 100),
+						TrnGetScale(hAn, iScaleIndex[2], 0), TrnGetScale(hAn, iScaleIndex[2], 100),
+						TrnGetScale(hAn, iScaleIndex[3], 0), TrnGetScale(hAn, iScaleIndex[3], 100),
+						TrnGetScale(hAn, iScaleIndex[4], 0), TrnGetScale(hAn, iScaleIndex[4], 100),
+						TrnGetScale(hAn, iScaleIndex[5], 0), TrnGetScale(hAn, iScaleIndex[5], 100),
+						TrnGetScale(hAn, iScaleIndex[6], 0), TrnGetScale(hAn, iScaleIndex[6], 100),
+						TrnGetScale(hAn, iScaleIndex[7], 0), TrnGetScale(hAn, iScaleIndex[7], 100)
+						);
+			END 
+		END
+	END
+	
+	return 0;
+END
+
+
+/*
+**	FUNCTION NAME: _PrinterSetup
+**
+**	Form callback function.
+*/
+
+INT	
+FUNCTION 
+_PrinterSetup() 
+
+	sPrintSetup = FormSelectPrinter(); 
+
+	RETURN 0; 
+END
+
+
+/*
+**	FUNCTION NAME: _TrendAssignTagArray
+**
+**	Finds which tags variables are being used and loads them into sTagArray[].
+**	Also builds the hTagArray which holds handles to all the valid tags. This
+**	is necessary for where pens 1,4 and 5 may be used rather than 1,2 and 3.
+**	Returns the number of tags found.
+**
+*/
+
+INT
+FUNCTION
+_TrendAssignTagArray(INT hAn)
+
+	INT	nTags = 0
+	INT	i;
+	
+	ErrSet(1);
+	FOR i = 0 TO 7 DO
+		sTagArray[i] = _TrendPenNameGet(hAn, i + 1);
+	END
+	ErrSet(0);
+
+	sTagArray[8] = "";
+	
+	FOR i = 0 TO 7 DO
+		hTagArray[i] = 8;		
+		IF StrLength(sTagArray[i]) <> 0 THEN
+			hTagArray[nTags] = i;
+			nTags = nTags + 1;
+		END
+	END
+
+	RETURN nTags;
+END
+
+
+/*
+**	FUNCTION NAME: _TrendHnd2PenNo
+**	Convert the handle in hTagArray to the actual pen number on page
+**
+*/
+
+INT
+FUNCTION
+_TrendHnd2PenNo(INT hTag)
+
+	RETURN hTagArray[hTag];
+	
+END
+
+
+/*
+**	FUNCTION:	TrendZoomSelectPen()
+**
+**	Allows the user to select any
+**	defined trend tag to be used as
+**	the current pen. Use this function 
+**	for the Zoom trend only.
+**
+*/ 
+
+FUNCTION
+TrendZoomSelectPen(INT hAn, STRING sPen, INT ZoomAn)
+	
+	STRING	sPenFocus;
+
+	TrendSelectPen(hAn, sPen);
+	
+	ErrSet(1);
+	sPenFocus = _TrendPenNameGet(hAn, 0);
+	IF sPenFocus <> "" THEN 
+		TrnSetPen(ZoomAn, 0, sPenFocus);
+	END
+	ErrSet(0);
+END
+
+
+/*
+**	FUNCTION:	TrendSelectPen()
+**
+**	Allows the user to select any
+**	defined trend tag to be used as
+**	the current pen.
+**
+*/ 
+
+INT 	SelectPenMode;
+STRING 	sTrendPenSelect;
+
+INT FUNCTION _AddPen() SelectPenMode = 1; return 0; END
+INT FUNCTION _DeletePen() SelectPenMode = 2; return 0; END
+INT FUNCTION _Comments() sTrendPenSelect = "1"; return 0; END
+INT FUNCTION _Tags() sTrendPenSelect = "0"; return 0; END
+
+FUNCTION
+TrendSelectPen(INT hAn, STRING sPen = "", INT hZoomAn = 0, INT Mode = 0)
+
+	INT 	hForm;
+	STRING 	sComment	= "";
+	INT		done		= FALSE;
+	STRING	sCluster	= "";
+	
+	SelectPenMode = 0;	/* Set global variable for Add/Delete operation */
+	
+	IF sPen <> "" THEN
+	        TrnSetPen(hAn, -2, sPen);
+	ELSE
+		sCluster = TrnGetCluster(hAn);
+		WHILE done = FALSE DO
+			done = TRUE;
+	        	IF ParameterGet("Trend", "TrendPenSelect", "0") = "0" THEN
+		       		hForm = FormNew("@(Select Pen)", 65, 4, 24);  
+		        	IF hForm <> -1 THEN
+				        FormComboBox(0, 0, 64, 8, sPen);
+				        _FormGetAllTrendPens(sCluster, "NAME", Mode);
+				        FormButton(21, 1, "@(Select from Comments)", _Comments, 2);
+				        FormButton(16, 2, "@(Add, 14, c)", _AddPen, 1);
+				        FormButton(33, 2, "@(Delete, 14, c)", _DeletePen, 1);
+				        FormButton(16, 3, "@(OK, 14, c)", 0, 1);
+				        FormButton(33, 3, "@(Cancel, 14, c)", 0, 2);
+				        
+					IF FormRead(0) = 0 THEN
+						_TrendNewPenSet(hAn, hZoomAn, sPen, SelectPenMode);
+						IF TrnPageTypeSPCGet() THEN
+							SPCDataUpdateNow(hAn);
+						END
+					ELSE 
+						IF sTrendPenSelect = "1" THEN
+							ParameterPut("Trend", "TrendPenSelect", "1");
+							done = FALSE;
+						END
+					END
+		        	END
+	        	ELSE
+		        	hForm = FormNew("@(Select Pen)", 65, 4, 24);
+
+		        	IF hForm <> -1 THEN				        
+                       	FormComboBox(0, 0, 64, 8, sComment);
+                       	_FormGetAllTrendPens(sCluster, "COMMENT", Mode);
+						FormButton(23, 1, "@(Select from Tags)", _Tags, 2);
+						FormButton(16, 2, "@(Add, 14, c)", _AddPen, 1);
+				        FormButton(33, 2, "@(Delete, 14, c)", _DeletePen, 1);
+				        FormButton(16, 3, "@(OK, 14, c)", 0, 1);
+				        FormButton(33, 3, "@(Cancel, 14, c)", 0, 2);
+
+					IF FormRead(0) = 0 THEN				
+						_TrendNewPenSet(hAn, hZoomAn, _FindPenFromComment(sComment), SelectPenMode);
+						IF TrnPageTypeSPCGet() THEN
+							SPCDataUpdateNow(hAn);
+						END
+					ELSE 
+						IF sTrendPenSelect = "0" THEN
+					       		ParameterPut("Trend", "TrendPenSelect", "0");
+				        		done = FALSE;
+						END
+					END
+	   	        	END	
+	        	END
+		END
+	END
+
+	TrendPenToolTip(hAn,0,0,0,0,0,0,0,0,2);
+END
+
+
+/*
+**	FUNCTION:	_TrendNewPenSet()
+**
+**	Sets the new pen/s depending on privilege, page type and 
+**	iMode - (OK, Add or Delete)
+**
+*/
+
+INT
+FUNCTION
+_TrendNewPenSet(INT hAn, INT hZoomAn, STRING sNewPen, INT iMode)
+
+	INT iPenNo;
+	
+	IF hZoomAn <> 0 THEN
+		TrnSetPenFocus(hZoomAn, TrnGetPenFocus(hAn));
+	END
+
+	IF iMode = 2 THEN
+		TrnSetPen(hAn, 0, "!");
+		TrnSetPenFocus(hAn, -2);
+		IF hZoomAn <> 0 THEN
+			TrnSetPen(hZoomAn, 0, "!");
+			TrnSetPenFocus(hZoomAn, -2);
+		END
+	ELSE IF sNewPen <> "" THEN
+		IF iMode = 0 THEN
+			TrnSetPen(hAn, 0, sNewPen);
+			IF hZoomAn <> 0 THEN
+				TrnSetPen(hZoomAn, 0, sNewPen);
+			END
+		ELSE IF iMode = 1 THEN
+			TrnSetPen(hAn, -2, sNewPen);
+			IF hZoomAn <> 0 THEN
+				TrnSetPen(hZoomAn, -2, sNewPen);
+			END
+			iPenNo = TrnGetPenNo(hAn, sNewPen);
+			IF TrnPageTypeGet() = TRN_PAGE_COMPARE AND iPenNo > MAX_COMPARE_PENS THEN
+				TrnSetPen(hAn, iPenNo, "!");
+				TrnSetPenFocus(hAn, -2);
+			END
+		END
+	END
+	END
+	END
+
+	RETURN 0;
+END
+
+/*
+**	FUNCTION:	_FindPenFromComment()
+**
+**	Finds the pen associated with the passed comment
+**
+*/
+
+STRING
+FUNCTION
+_FindPenFromComment(STRING sComment, INT Mode = 0)
+	INT		Error;
+	STRING	sPen					= "";
+	INT		CorrectModePenFoundFlag = 0;
+	INT		SPCFlag;
+	INT		hTrendBrowse			= -1;
+	INT		status					= 0;
+	
+	IF sComment <> "" THEN
+		hTrendBrowse = TrnBrowseOpen("COMMENT=^"" + sComment + "^"", "NAME, COMMENT, SPCFLAG", "");
+		IF hTrendBrowse <> -1 THEN
+			status = TrnBrowseFirst(hTrendBrowse);	
+			WHILE ((status = 0) AND (NOT CorrectModePenFoundFlag)) DO
+				sPen = TrnBrowseGetField(hTrendBrowse, "NAME");
+				SPCFlag = StrToInt(TrnBrowseGetField(hTrendBrowse, "SPCFLAG"));
+				IF sPen <> "" AND Mode = SPCFlag THEN
+					CorrectModePenFoundFlag = 1;				
+				ELSE
+					status = TrnBrowseNext(hTrendBrowse);
+				END			
+			END
+		END
+	END
+
+	IF hTrendBrowse <> -1 THEN	
+		TrnBrowseClose(hTrendBrowse);
+	END
+
+	IF (CorrectModePenFoundFlag <> 1) THEN
+		sPen = "";	
+	END	
+
+	return sPen;
+END
+
+
+/*
+**	FUNCTION:	_FindCommentFromPen()
+**
+**	Finds the comment associated with the passed pen
+**
+*/
+
+STRING
+FUNCTION
+_FindCommentFromPen(STRING sPenAndCluster)
+	STRING 	sComment		= "";
+	INT		hTrendBrowse	= -1;
+	INT		status			= 0;
+	INT		dotPos			= -1;
+	STRING	sPen			= "";
+	STRING	sCluster		= "";	
+	
+	IF sPenAndCluster <> "" THEN
+		dotPos = StrSearch(0, sPenAndCluster, ".");
+		IF  dotPos > 0 THEN
+			sCluster = StrLeft(sPenAndCluster, dotPos);
+			sPen = StrRight(sPenAndCluster, StrLength(sPenAndCluster) - 1 - dotPos);			
+		ELSE
+			sPen = sPenAndCluster;		
+		END
+
+		hTrendBrowse = TrnBrowseOpen("NAME=" + sPen, "NAME, COMMENT", sCluster);
+		
+		IF hTrendBrowse <> -1 THEN	
+			status = TrnBrowseFirst(hTrendBrowse);
+			IF status = 0 THEN
+				sComment = TrnBrowseGetField(hTrendBrowse, "COMMENT");
+			END
+		END
+	END
+	
+	IF hTrendBrowse <> -1 THEN	
+		TrnBrowseClose(hTrendBrowse);
+	END
+	
+	return sComment;
+END
+
+
+/*
+**	FUNCTION:	_FormGetAllTrendPens()
+**
+**	Adds all defined trend pens to the current 
+**	ComboBox or ListBox.
+**		Mode	0 - Normal Trend
+**			1 - SPC Trend
+**
+*/
+
+FUNCTION
+_FormGetAllTrendPens(STRING sCluster, STRING sField, INT Mode = 0)
+	STRING	sPen;
+	INT		SPCFlag;
+	INT		hTrendBrowse = -1;
+	INT		status = 0;
+	
+	IF sCluster <> "" THEN
+		hTrendBrowse = TrnBrowseOpen("", "NAME, COMMENT, SPCFLAG", sCluster);
+		IF hTrendBrowse <> -1 THEN	
+			status = TrnBrowseFirst(hTrendBrowse);
+			WHILE status = 0 DO
+				sPen = TrnBrowseGetField(hTrendBrowse, sField);
+				SPCFlag = StrToInt(TrnBrowseGetField(hTrendBrowse, "SPCFLAG"));
+				IF sPen <> "" AND Mode = SPCFlag THEN
+		      		FormAddList(sPen);
+		      	END
+				status = TrnBrowseNext(hTrendBrowse);
+			END
+		END
+	END
+	
+	IF hTrendBrowse <> -1 THEN	
+		TrnBrowseClose(hTrendBrowse);
+	END
+END
+
+
+/*
+**
+**	FUNCTION:	DspRubberEnd
+**
+**	This is a wrapper function around the DspRubEnd
+**	function in this file so that the functions
+**	outside this file can set the rubber band
+**	coordinates which are used inside this file. 
+*/
+
+FUNCTION
+DspRubberEnd()
+	DspRubEnd(RubX1, RubY1, RubX2, RubY2); 
+END
+
+
+FUNCTION
+DspRubberCheckAreaSelected()
+
+	IF Abs(RubX2 - RubX1) < 3 THEN
+		AreaSelected = 0;
+ 	END
+END
+
+FUNCTION
+DspRubberRedraw()
+	
+	IF AreaSelected THEN 
+		DspRubStart(RubX1,RubY1,6);
+		DspRubMove(RubX2,RubY2);
+	END
+END

@@ -1,0 +1,2379 @@
+/*
+**      FILE:   export.ci
+**      
+**      AUTHOR: Greg Symington
+**      
+**      DATE:   September 1994
+**
+**      REVISION:
+**
+**      FUNCTIONS:
+**              TrnExportCSV
+**              TrnExportDBF
+**              TrnExportClip
+**              PageTrend
+**              TrendWin
+**              TrendPopUp
+**
+**      NOTES:
+**              These functions allow data to be exported to
+**              different file / clipboard formats easily.
+**              Currently supports:
+**                      TXT
+**                      DBF
+**                      Clipboard
+**
+*/
+
+/*******************      GLOBAL DEFINES        ******************/
+
+INT	TREND_TYPE_PERIODIC		= 1;
+INT	TREND_TYPE_EVENT		= 2;
+INT	TREND_TYPE_PERIODIC_EVENT	= 3;
+
+INT	TREND_DATA_VALID		= 0;
+INT	TREND_DATA_GATED		= 1;
+INT	TREND_DATA_NO_VALUES		= 2;
+
+INT	DISPLAYMODE_INVALID_GATED_ZERO	= 0;
+INT	DISPLAYMODE_INVALID_GATED_AS_IS	= 1;
+
+INT	DISPLAYMODE_NORMAL_DATA		= 0;
+INT	DISPLAYMODE_REVERSE_DATA	= 2;
+
+INT	DISPLAYMODE_CONDENSE_MEAN	= 0;
+INT	DISPLAYMODE_CONDENSE_MINIMUM	= 4;
+INT	DISPLAYMODE_CONDENSE_MAXIMUM	= 8;
+
+INT	DISPLAYMODE_STRETCH_STEP	= 0;
+INT	DISPLAYMODE_STRETCH_RATIO	= 128;
+INT	DISPLAYMODE_STRETCH_RAWSAMPLES	= 256;
+
+INT	DISPLAYMODE_GAPFILL_CONSTANT	= 4096;
+
+INT DISPLAYMODE_DISPLAY_AS_PERIODIC = 0x100000;
+
+INT	DEFAULT_EXPORT_DISPLAYMODE	= 3; // DISPLAYMODE_INVALID_GATED_AS_IS BITOR DISPLAYMODE_REVERSE_DATA
+
+INT MAXIMUM_EXPORT_SPAN	= 2147483647; // one less than 2 to the power of 31
+
+INT TREND_INFO_STORAGECLASS = 8;	// type argument for trninfo
+
+INT MAX_DBF_FIELDNAME_LEN = 10;
+
+INT TABLE_MODE_IGNORE_INVALID = 0x0004 // Ignore GATED or INVALID samples.
+
+/*******************    GLOBAL VARIABLES        ******************/
+
+REAL    aTrnArray[2048];        /* array of the trend tag data  */
+INT     iTimeArray[2048];       /* array of event trend times   */
+INT     hSem = -1;              /* export semaphore handle      */
+STRING  sTagArray[9];           /* array of the tag names       */
+INT     hTagArray[8];           /* array of tag handles         */
+INT     nTagArray[8];		/* array of tag types		*/
+STRING  g_sPenName[8];      /* array of pen names       */
+INT	nDisplayModeArray[9];	/* array of display modes	*/
+INT	nMSOfDay = 86400000;	/* one day in milliseconds	*/
+
+
+INT
+FUNCTION
+_TrendTypeGet(STRING sPen, INT displayMode)
+
+	STRING	sType;
+	INT 	nType = -1;
+	
+	IF sPen <> "" THEN
+		sType = TrnInfo(sPen, 1);
+		IF sType <> "" THEN
+			nType = StrToInt(sType);
+			IF displayMode BITAND DISPLAYMODE_DISPLAY_AS_PERIODIC THEN
+				nType = TREND_TYPE_PERIODIC;
+			END
+		END
+	END
+
+	RETURN nType;
+END
+
+/*
+**      FUNCTION NAME: TrendValueToString
+**
+**      This function converts the given trend value to a string.
+**
+*/
+
+STRING
+FUNCTION
+TrendValueToString(REAL rawValue, INT displayMode, INT nTableMode, INT width, INT decimalPlaces)
+	
+	STRING	sValue = "";
+	INT		nValidData = TrnIsValidValue(rawValue);
+	
+	IF nValidData <> TREND_DATA_VALID THEN
+		IF (nTableMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+			sValue = "";
+		ELSE
+			IF (displayMode BITAND DISPLAYMODE_INVALID_GATED_AS_IS) THEN
+				IF nValidData = TREND_DATA_GATED THEN
+					sValue = "gated";
+				ELSE
+					sValue = "n/a";
+				END
+			ELSE
+				rawValue	= 0.0;
+				nValidData	= TREND_DATA_VALID;
+			END
+		END
+	END
+	
+	IF nValidData = TREND_DATA_VALID THEN
+		sValue = RealToStr(rawValue, width, decimalPlaces);
+	END
+	
+	RETURN sValue;
+END
+
+/*
+**      FUNCTION NAME: TrnExportCSV
+**
+**      This function exports trend data to a CSV file.
+**      Returns the number of samples exported.
+**
+*/
+
+INT
+FUNCTION
+TrnExportCSV(STRING sFile, INT nTime, REAL nPeriod, INT nLength, INT nMode,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+
+	INT     nTrendType;     
+	INT	nError = 0;
+	INT     nTags;          /* number of tags to be exported        */
+	
+	IsError();
+	IF _GetExportSemaphore() = 0 THEN
+		RETURN 298;
+	END
+	
+	nTags = _TrnExpTagsToArray(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+	IF nTags = 0 THEN
+		SemSignal(hSem);
+		RETURN 301;
+	END
+	_TrnExpDisplayModesToArray(nMode, nDisplayMode1, nDisplayMode2, nDisplayMode3,
+		nDisplayMode4, nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+		
+	nError = _TrnExpCheckTagTypes(nTags, 1);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	
+	IF nTime > TimeCurrent() THEN
+		nTime = TimeCurrent();
+	END
+	
+	ErrSet(1);
+	nTrendType = _TrendTypeGet(sTagArray[hTagArray[0]], nDisplayModeArray[hTagArray[0]]);
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		nError = _TrnPeriodicExportCSV(sFile, nTime, nPeriod, nLength, nMode, nTags); 
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		nError = _TrnEventExportCSV(sFile, nTime, nPeriod, nLength, nMode, nTags);
+	ELSE
+		nError = 301;
+	END END
+
+	IF	nError <> 0 AND nError <> 344 AND FileExist(sFile) THEN
+		FileDelete(sFile);
+	END
+
+	SemSignal(hSem);
+	ErrSet(0);
+	RETURN nError;
+END
+	
+INT
+FUNCTION
+_TrnPeriodicExportCSV(STRING sFile, INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nTags)
+	INT		newLength;
+	INT		fieldWidth;
+	STRING	sFmt;
+	STRING	sListSep;												/* List seperator								*/
+	INT		nError = 0;
+	INT		hFile;
+	INT		hFmt;
+	INT		i, j, k;
+	INT		nDataValid;
+	INT		nBlock;         										/* number of trend array blocks to be read  	*/
+	INT		nBlockSize;     										/* block size	          						*/
+	INT		nStartBlockOffsetMS = -1 * ((nLength - 1) * nPeriod);   /* offset to the starting time in block	*/
+	INT		nEndBlockOffsetMS;										/* end time of the current block				*/
+	INT		nRoundedMilliseconds;									/* Times get rounded to hundreds of milliseconds*/
+	INT		MAXBLOCK = 256; 										/* set to an eighth of the sTrnArray[] 			*/
+	INT		nCount = 0;
+	INT		nFactorMS = 1000;										/* We only use millisecond offsets if the span of the
+																	   data is sufficiently small. Otherwise we have to 
+																	   use offsets in seconds */
+	IF MAXIMUM_EXPORT_SPAN / 1000 < ((nLength - 1) * nPeriod) THEN
+		nFactorMS = 1;
+	END
+
+	nStartBlockOffsetMS = nStartBlockOffsetMS * nFactorMS;
+	
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	hFile = FileOpen(sFile,"w");
+	IF hFile <> -1  THEN
+		
+		IF nMode BITAND 0x0002 THEN
+			sFmt = "{TIME,16}";
+		ELSE 
+			sFmt = "{DATE,12}" + sListSep + "{TIME,16}";
+		END
+			
+		FOR j = 0 TO nTags - 1 DO
+			newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+			IF newLength > 255 THEN
+				nTags = j;
+				nError = 344; // Format overflow
+			ELSE
+				fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+				sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+			END
+		END
+		hFmt = FmtOpen("TrnExport", sFmt, 1);
+
+		IF hFmt <> -1 THEN
+			
+			IF nMode BITAND 0x0002 THEN
+				FmtSetField(hFmt, "TIME", "TIME");
+			ELSE
+				FmtSetField(hFmt, "DATE", "DATE");
+				FmtSetField(hFmt, "TIME", "TIME");
+			END
+			
+			FOR j = 0 TO nTags - 1 DO
+				FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+			END
+
+			IF nMode BITAND 0x0010 THEN
+				;	/* don't put field names in first row */
+			ELSE
+				FileWriteLn(hFile, FmtToStr(hFmt));
+			END
+
+			DevModify("Scratch", sFmt, "", sFile, ASCII_DEV); // dodgy, THIS ALLOWS CTAPITrend() to work
+			
+			nBlock = nLength / MAXBLOCK;
+			
+			FOR k = 0 TO nBlock DO
+				
+				IF k = nBlock THEN
+					nBlockSize = nLength - nBlock * MAXBLOCK;	
+				ELSE
+					nBlockSize = MAXBLOCK;                 
+				END
+				
+				nEndBlockOffsetMS = nStartBlockOffsetMS + (((nBlockSize - 1) * nPeriod) * nFactorMS);
+			
+				FOR i = 0 TO nTags - 1 DO
+					TrnGetTable(sTagArray[hTagArray[i]], _GetSecsFromOffsetMS(nTime, nEndBlockOffsetMS, nFactorMS), nPeriod, nBlockSize, aTrnArray[i*MAXBLOCK], nDisplayModeArray[hTagArray[i]], _GetMilliFromOffsetMS(nEndBlockOffsetMS, nFactorMS));
+					IsError();
+				END
+				
+				FOR i = 0 TO nBlockSize - 1 DO
+					IF (nMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+						nDataValid = 0;
+						
+						FOR j = 0 TO nTags - 1 DO 
+							IF (TrnIsValidValue(aTrnArray[i + j * MAXBLOCK]) = TREND_DATA_VALID) THEN
+								nDataValid = 1;
+								j = nTags - 1;
+							END
+						END
+					ELSE
+						nDataValid = 1;
+					END
+					
+					IF (nDataValid = 1) THEN	
+						IF (nPeriod < 1.0 OR (nMode BITAND 0x0008)) THEN
+							nRoundedMilliseconds = _GetMilliSinceMidnightFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS) / 100;
+							nRoundedMilliseconds = nRoundedMilliseconds * 100;
+							FmtSetField(hFmt, "TIME", TimeToStr(nRoundedMilliseconds, 6));
+						ELSE
+							FmtSetField(hFmt, "TIME", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 1));
+						END
+						IF nMode BITAND 0x0002 THEN
+							;	/* don't show a date */
+						ELSE
+							FmtSetField(hFmt, "DATE", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 9));
+						END
+					
+						FOR j = 0 TO nTags - 1 DO 
+							FmtSetField(hFmt, sTagArray[hTagArray[j]],
+										TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 10, 5));
+						END
+
+						FileWriteLn(hFile, FmtToStr(hFmt));
+					END
+					
+					nStartBlockOffsetMS = nStartBlockOffsetMS + (nPeriod * nFactorMS);
+					// Check task running signal
+					IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+						i = nBlockSize;
+						k = nBlock + 1;
+					ELSE
+						// Reduce CPU load
+						IF nCount >= 300 THEN
+							nCount = 0;
+							SleepMS(100);
+						ELSE
+							nCount = nCount + 1;
+						END
+					END
+				END
+			END
+			FmtClose(hFmt);
+		ELSE
+			nError = IsError();
+		END
+		FileClose(hFile);       
+	ELSE
+		nError = IsError();
+	END
+	
+	RETURN nError;
+END
+
+
+INT
+FUNCTION
+_TrnEventExportCSV(STRING sFile, INT nEvent, INT nPeriod, INT nLength, INT nMode, INT nTags)
+	INT		newLength;
+	INT		fieldWidth;		
+	STRING	sFmt;
+	STRING	sListSep;	/* List seperator */
+	INT		nError = 0;
+	INT		hFile;
+	INT		hFmt;
+	INT		i, j, k;
+	INT		nBlock;         /* number of trend array blocks to be read      */
+	INT		nBlockSize;     /* block size                                   */
+	INT		nBlockEvent;    /* earliest time in block                       */
+	INT		MAXBLOCK = 256; /* set to an eighth of the sTrnArray[]          */
+	INT		nCount = 0;
+	
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	hFile = FileOpen(sFile,"w");
+	IF hFile <> -1  THEN
+			
+		IF nMode BITAND 0x0002 THEN
+			sFmt = "{EVENT,8}" + sListSep + "{TIME,16}";
+		ELSE 
+			sFmt = "{EVENT,8}" + sListSep + "{DATE,12}" + sListSep + "{TIME,16}";
+		END
+			
+		FOR j = 0 TO nTags - 1 DO
+			newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+			IF newLength > 255 THEN
+				nTags = j;
+				nError = 344; // Format overflow
+			ELSE
+				fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+				sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+			END
+		END
+		hFmt = FmtOpen("TrnExport", sFmt, 1);
+
+		IF hFmt <> -1 THEN
+			
+			IF nMode BITAND 0x0002 THEN
+				FmtSetField(hFmt,"EVENT", "EVENT");
+				FmtSetField(hFmt, "TIME", "TIME");
+			ELSE
+				FmtSetField(hFmt,"EVENT", "EVENT");
+				FmtSetField(hFmt, "DATE", "DATE");
+				FmtSetField(hFmt, "TIME", "TIME");
+			END
+				
+			FOR j = 0 TO nTags - 1 DO
+				FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+			END
+
+			IF nMode BITAND 0x0010 THEN
+				;	/* don't put field names in first row */
+			ELSE
+				FileWriteLn(hFile, FmtToStr(hFmt));
+			END
+
+			DevModify("Scratch", sFmt, "", sFile, ASCII_DEV); // dodgy, THIS ALLOWS CTAPITrend() to work
+
+			nBlock = nLength / MAXBLOCK;
+
+			FOR k = 0 TO nBlock DO
+		
+				IF k = nBlock THEN
+					nBlockSize = nLength - nBlock * MAXBLOCK;
+				ELSE
+					nBlockSize = MAXBLOCK;                  
+				END
+				nBlockEvent = nEvent - (nLength-1) + (k * MAXBLOCK);
+			
+				FOR i = 0 TO nTags - 1 DO
+					TrnEventGetTable(sTagArray[hTagArray[i]], nBlockEvent + (nBlockSize - 1), nPeriod,
+							nBlockSize, aTrnArray[i*MAXBLOCK], iTimeArray[i*MAXBLOCK], 0x02);
+					IsError();
+				END
+				
+				FOR i = 0 TO nBlockSize - 1 DO
+			
+					IF nMode BITAND 0x0002 THEN
+						FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+						FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+					ELSE
+						FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+						FmtSetField(hFmt, "DATE", TimeToStr(iTimeArray[i], 9));
+						FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+					END
+					FOR j = 0 TO nTags - 1 DO
+						FmtSetField(hFmt, sTagArray[hTagArray[j]], RealToStr(aTrnArray[i + j * MAXBLOCK], 10, 5));
+					END
+					
+					FileWriteLn(hFile, FmtToStr(hFmt));
+
+					// Check task running signal
+					IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+						i = nBlockSize;
+						k = nBlock + 1;
+					ELSE
+						// Reduce CPU load
+						IF nCount >= 300 THEN
+							nCount = 0;
+							SleepMS(100);
+						ELSE
+							nCount = nCount + 1;
+						END
+					END
+				END
+			END
+			FmtClose(hFmt);
+		ELSE
+			nError = IsError();
+		END
+		FileClose(hFile);
+	ELSE
+		nError = IsError();       
+	END
+	
+	RETURN nError;
+END
+
+/*
+**      FUNCTION Name: TrnExportDBF
+**
+**      This FUNCTION exports trend data TO a DBF file.
+**      Returns the number of samples exported.
+**
+*/
+
+INT
+FUNCTION
+TrnExportDBF(STRING sFile, INT nTime, REAL nPeriod, INT nLength, INT nMode,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+
+	INT     nError = 0;
+	INT     nTags;          /* number of tags to be exported        */
+	INT     nTrendType;     /* type of trend ie. Periodic or Event  */
+
+	IsError();
+	IF _GetExportSemaphore() = 0 THEN
+		RETURN 298;
+	END
+		
+	nTags = _TrnExpTagsToArray(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+	IF nTags = 0 THEN
+		SemSignal(hSem);
+		RETURN 301;
+	END
+	_TrnExpDisplayModesToArray(nMode, nDisplayMode1, nDisplayMode2, nDisplayMode3,
+		nDisplayMode4, nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+	
+	nError = _TrnExpCheckTagTypes(nTags, 1);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	
+	IF nTime > TimeCurrent() THEN
+		nTime = TimeCurrent();
+	END
+	
+	ErrSet(1);
+	nTrendType = _TrendTypeGet(sTagArray[hTagArray[0]], nDisplayModeArray[hTagArray[0]]);
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		nError = _TrnPeriodicExportDBF(sFile, nTime, nPeriod, nLength, nMode, nTags);
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		nError = _TrnEventExportDBF(sFile, nTime, nPeriod, nLength, nMode, nTags);
+	ELSE
+		nError = 301;
+	END END
+			
+	IF nError <> 0 AND FileExist(sFile) THEN
+		FileDelete(sFile);
+	END
+
+	SemSignal(hSem);
+	ErrSet(0);
+	RETURN nError;
+END
+
+
+/*
+**      FUNCTION Name: GetClusterPart
+**
+**      This FUNCTION returns the cluster part of the "cluster.tag".
+**      e.g
+**		sCluster = GetClusterPart("Cluster1.Tag1");
+**		// sCluster contains "Cluster1");
+**
+*/
+
+STRING
+FUNCTION
+GetClusterPart(STRING sClusterPlusTag)
+	STRING sResult;
+	INT nPos;
+	
+	sResult = "";
+	nPos = StrSearch(0, sClusterPlusTag, ".")
+	IF (nPos <> -1) THEN
+		IF (nPos > 1 ) THEN
+			sResult = StrLeft(sClusterPlusTag, nPos-1);
+		END
+	END
+	
+	RETURN sResult;
+END
+
+
+/*
+**      FUNCTION Name: GetTagPart
+**
+**      This FUNCTION returns the tag part of the "cluster.tag".
+**      e.g
+**		sTag = GetTagPart("Cluster1.Tag1");
+**		// sTag contains "Tag1");
+**
+*/
+
+STRING
+FUNCTION
+GetTagPart(STRING sClusterPlusTag)
+	STRING sResult;
+	INT nPos;
+
+	sResult = sClusterPlusTag;
+	nPos = StrSearch(0, sClusterPlusTag, ".")
+	IF (nPos <> -1) THEN
+		IF (StrLength(sClusterPlusTag) > (nPos+1)) THEN
+			sResult = StrMid(sClusterPlusTag, nPos+1, StrLength(sClusterPlusTag)-(nPos+1));
+		END
+	END
+	
+	RETURN sResult;
+END
+
+
+/*
+**      FUNCTION Name: SetupPenNames
+**
+**      This FUNCTION Sets up the Pen Names used in _TrnPeriodicExportDBF().
+**      e.g
+**		PenName1 = "Cluster1.Tag1"
+**		PenName2 = "Cluster1.Tag2"
+**
+**		IF the Pen Names are longer than 10 (.DBF field name max.width is 10)
+**		AND the clusters are all the same 
+**		THEN the Cluster names are removed
+**
+**		IF the Pen Names are still too long
+**      THEN they are replaced with "_Pen[1]_", "_Pen[2]_", etc.
+**
+*/
+
+FUNCTION
+SetupPenNames(INT nTags)
+	INT j;
+	INT bTooLong;
+	INT bSameCluster;
+	STRING sClusterName;
+	STRING sClusterFirst;
+
+	sClusterFirst = "";
+	bTooLong = 0;
+	bSameCluster = 1;
+
+	FOR j = 0 TO nTags - 1 DO
+		g_sPenName[j] = sTagArray[hTagArray[j]];
+		sClusterName = GetClusterPart(g_sPenName[j]);
+		IF (StrLength(g_sPenName[j]) > MAX_DBF_FIELDNAME_LEN) THEN
+			bTooLong = 1;
+		END
+		IF (j = 0) THEN
+			sClusterFirst = sClusterName;
+		ELSE
+			IF (StrUpper(sClusterName) <> StrUpper(sClusterFirst)) THEN
+				bSameCluster = 0;
+			END
+		END
+	END
+	
+	IF ((bTooLong <> 0) AND (bSameCluster <> 0)) THEN
+		bTooLong = 0;
+		FOR j = 0 TO nTags - 1 DO
+			g_sPenName[j] = GetTagPart(sTagArray[hTagArray[j]]);
+			IF (StrLength(g_sPenName[j]) > MAX_DBF_FIELDNAME_LEN) THEN
+				bTooLong = 1;
+			END
+		END
+	END
+	
+	IF (bTooLong <> 0) THEN
+		FOR j = 0 TO nTags - 1 DO
+			g_sPenName[j] = "Pen" + IntToStr(j+1);
+		END
+	END
+END
+
+
+INT
+FUNCTION
+_TrnPeriodicExportDBF(STRING sFile, INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nTags)
+	
+	STRING  sFmt;
+	STRING	sTag;
+	INT		nDataSize = 2;
+	INT		nError = 0;
+	INT     hDev;
+	INT		hDevMod;
+	INT 	nDataValid;
+	INT     hFmt;
+	INT     nBlock;         								/* number of trend array blocks to be read      		*/
+	INT     nBlockSize;     								/* block size                                   		*/
+	INT		nStartBlockOffsetMS = -1 * ((nLength - 1) * nPeriod); /* Offset to the starting time in block	*/
+	INT		nEndBlockOffsetMS;								/* end time of the current block						*/
+	INT		nTempTime;
+	INT     MAXBLOCK = 256; 								/* set to an eighth of the sTrnArray[]          		*/
+	INT     i, j, k;
+	INT		nCount = 0;
+	INT		nFactorMS = 1000;								/* We only use millisecond offsets if the span of the
+															   data is sufficiently small. Otherwise we have to 
+															   use offsets in seconds */
+	IF MAXIMUM_EXPORT_SPAN / 1000 < ((nLength - 1) * nPeriod) THEN
+		nFactorMS = 1;
+	END
+		
+	nStartBlockOffsetMS = nStartBlockOffsetMS * nFactorMS;
+		
+	SetupPenNames(nTags);
+	
+	IF nMode BITAND 0x0002 THEN
+		sFmt = "{TIME,16}";
+	ELSE 
+		sFmt = "{DATE,12},{TIME,16}";
+	END
+		
+	FOR j = 0 TO nTags - 1 DO
+		sTag = sTagArray[hTagArray[j]];
+		nDataSize = TrnInfo(sTag, TREND_INFO_STORAGECLASS);
+		IF nDataSize = 2 THEN
+			sFmt = sFmt + ",{" + g_sPenName[j] + ",10}";
+		ELSE 
+			sFmt = sFmt + ",{" + g_sPenName[j] + ",29}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+		
+	IF hFmt <> -1 THEN
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END                     
+			
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, g_sPenName[j], g_sPenName[j]);
+		END
+
+		IF FileExist(sFile) THEN
+			FileDelete(sFile);
+		END
+		hDevMod = DevModify("Scratch", sFmt, "", sFile, 2);
+		IF hDevMod = 0 THEN
+			hDev = DevOpen("Scratch",1);
+			
+			IF hDev <> -1  THEN
+				nBlock = nLength / MAXBLOCK;
+
+				FOR k = 0 TO nBlock DO
+			
+					IF k = nBlock THEN
+						nBlockSize = nLength - nBlock * MAXBLOCK;
+					ELSE
+						nBlockSize = MAXBLOCK;                  
+					END
+					
+					nEndBlockOffsetMS = nStartBlockOffsetMS + (((nBlockSize - 1) * nPeriod) * nFactorMS);
+			
+					FOR i = 0 TO nTags - 1 DO
+						TrnGetTable(sTagArray[hTagArray[i]], _GetSecsFromOffsetMS(nTime, nEndBlockOffsetMS, nFactorMS), nPeriod, nBlockSize, aTrnArray[i*MAXBLOCK], nDisplayModeArray[hTagArray[i]], _GetMilliFromOffsetMS(nEndBlockOffsetMS, nFactorMS));
+						IsError();
+					END
+					
+					FOR i = 0 TO nBlockSize - 1 DO
+						IF (nMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+							nDataValid = 0;
+							
+							FOR j = 0 TO nTags - 1 DO 
+								IF (TrnIsValidValue(aTrnArray[i + j * MAXBLOCK]) = TREND_DATA_VALID) THEN
+									nDataValid = 1;
+									j = nTags - 1;
+								END
+							END
+						ELSE
+							nDataValid = 1;
+						END
+						
+						IF (nDataValid = 1) THEN
+							DevAppend(hDev);
+							IF (nPeriod < 1.0 OR (nMode BITAND 0x0008)) THEN
+								DevSetField(hDev, "TIME", TimeToStr(_GetMilliSinceMidnightFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 6));
+							ELSE
+								DevSetField(hDev, "TIME", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 1));
+							END
+							IF nMode BITAND 0x0002 THEN
+								;	/* don't print the date */
+							ELSE
+								DevSetField(hDev, "DATE", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 9));
+							END
+	
+							FOR j = 0 TO nTags - 1 DO
+								sTag = sTagArray[hTagArray[j]];
+								nDataSize = TrnInfo(sTag, TREND_INFO_STORAGECLASS);
+								IF nDataSize = 2 THEN	
+									DevSetField(hDev, g_sPenName[j],
+												TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 10, 5));
+								ELSE
+									DevSetField(hDev, g_sPenName[j],
+												TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 29, 15));
+								END
+							END
+						END
+						
+						nStartBlockOffsetMS = nStartBlockOffsetMS + (nPeriod * nFactorMS);
+						
+						// Check task running signal
+						IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+							i = nBlockSize;
+							k = nBlock + 1;
+						ELSE
+							// Reduce CPU load
+							IF nCount >= 300 THEN
+								nCount = 0;
+								SleepMS(100);
+							ELSE
+								nCount = nCount + 1;
+							END
+						END
+					END
+				END
+				DevClose(hDev);
+			ELSE
+				nError = IsError(); 
+			END
+		ELSE
+			nError = IsError();
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	
+	RETURN nError;
+END
+
+INT
+FUNCTION
+_TrnEventExportDBF(STRING sFile, INT nEvent, INT nPeriod, INT nLength, INT nMode, INT nTags)
+	
+	STRING          sFmt;
+	STRING	sTag;
+	INT		nDataSize = 2;
+	INT		nError = 0;
+	INT             hDev;
+	INT		hDevMod;
+	INT             hFmt;
+	INT             nBlock;         /* number of trend array blocks TO be read      */
+	INT             nBlockSize;     /* block size                                   */
+	INT             nBlockEvent;    /* earliest time in block                       */
+	INT             MAXBLOCK = 256; /* set to an eighth of the sTrnArray[]          */
+	INT             i, j, k;
+	INT		nCount = 0;
+	
+	IF nMode BITAND 0x0002 THEN
+			sFmt = "{EVENT,8},{TIME,16}";
+	ELSE 
+		sFmt = "{EVENT,8},{DATE,12},{TIME,16}";
+	END
+			
+	FOR j = 0 TO nTags - 1 DO
+		sTag = sTagArray[hTagArray[j]];
+		nDataSize = TrnInfo(sTag, TREND_INFO_STORAGECLASS);
+		IF nDataSize = 2 THEN
+			sFmt = sFmt + ",{" + StrLeft(sTag, MAX_DBF_FIELDNAME_LEN) + ",10}";
+		ELSE 
+			sFmt = sFmt + ",{" + StrLeft(sTag, MAX_DBF_FIELDNAME_LEN) + ",29}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+		
+	IF hFmt <> -1 THEN
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END                     
+		
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, StrLeft(sTagArray[hTagArray[j]], MAX_DBF_FIELDNAME_LEN),
+						StrLeft(sTagArray[hTagArray[j]], MAX_DBF_FIELDNAME_LEN));
+		END
+
+		IF FileExist(sFile) THEN
+			FileDelete(sFile);
+		END
+		hDevMod = DevModify("Scratch", sFmt, "", sFile, 2);   
+		IF hDevMod = 0 THEN
+			hDev = DevOpen("Scratch",1);
+			
+			IF hDev <> -1  THEN
+				nBlock = nLength / MAXBLOCK;
+				
+				FOR k = 0 TO nBlock DO
+		
+					IF k = nBlock THEN
+						nBlockSize = nLength - nBlock * MAXBLOCK;
+					ELSE
+						nBlockSize = MAXBLOCK;                  
+					END
+					nBlockEvent = nEvent - (nLength-1) + (k * MAXBLOCK);
+				
+		       			FOR i = 0 TO nTags - 1 DO
+	       					TrnEventGetTable(sTagArray[hTagArray[i]], nBlockEvent + (nBlockSize - 1), nPeriod, nBlockSize, aTrnArray[i*MAXBLOCK],
+								iTimeArray[i*MAXBLOCK], 0x02);
+						IsError();
+					END
+					
+					FOR i = 0 TO nBlockSize - 1 DO
+				
+						DevAppend(hDev);
+						IF nMode BITAND 0x0002 THEN
+							DevSetField(hDev, "EVENT", (nBlockEvent + i));
+							DevSetField(hDev, "TIME", TimeToStr(iTimeArray[i], 1));
+						ELSE
+							DevSetField(hDev, "EVENT", (nBlockEvent + i));
+							DevSetField(hDev, "DATE", TimeToStr(iTimeArray[i], 9));
+							DevSetField(hDev, "TIME", TimeToStr(iTimeArray[i], 1));
+						END
+						
+						FOR j = 0 TO nTags - 1 DO
+							sTag = sTagArray[hTagArray[j]];
+							nDataSize = TrnInfo(sTag, TREND_INFO_STORAGECLASS);
+							IF nDataSize = 2 THEN
+								DevSetField(hDev, sTag, RealToStr(aTrnArray[i + j * MAXBLOCK], 10, 5));
+							ELSE 
+								DevSetField(hDev, sTag, RealToStr(aTrnArray[i + j * MAXBLOCK], 29, 15));
+							END
+						END
+
+						// Check task running signal
+						IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+							i = nBlockSize;
+							k = nBlock + 1;
+						ELSE
+							// Reduce CPU load
+							IF nCount >= 300 THEN
+								nCount = 0;
+								SleepMS(100);
+							ELSE
+								nCount = nCount + 1;
+							END
+						END
+					END
+				END
+				DevClose(hDev); 
+			ELSE
+				nError = IsError();
+			END
+		ELSE
+			nError = IsError();
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	
+	RETURN nError;
+END
+
+
+/*
+**      FUNCTION NAME: TrnExportClip
+**
+**      This function exports trend data to the ClipBoard.
+**      Returns the number of samples exported.
+**      Use the ClipSetMode function to set the format to
+**              be used.                
+**
+*/
+
+INT
+FUNCTION
+TrnExportClip(INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nClipType,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+	
+	INT             nOldClipType;
+	INT             nTrendType;
+	INT             nError = 0;
+	INT             nTags;          /* number of tags to be exported                */
+
+	IsError();
+	IF _GetExportSemaphore() = 0 THEN
+		RETURN 298;
+	END
+	
+	nTags = _TrnExpTagsToArray(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+	IF nTags = 0 THEN
+		SemSignal(hSem);
+		RETURN 301;
+	END
+	_TrnExpDisplayModesToArray(nMode, nDisplayMode1, nDisplayMode2, nDisplayMode3,
+		nDisplayMode4, nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+
+	nError = _TrnExpCheckTagTypes(nTags, 1);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	
+	IF nTime > TimeCurrent() THEN
+		nTime = TimeCurrent();
+	END
+	
+	ErrSet(1);
+	nOldClipType = ClipSetMode(nClipType);
+	nTrendType = _TrendTypeGet(sTagArray[hTagArray[0]], nDisplayModeArray[hTagArray[0]]);
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		nError = _TrnPeriodicExportClip(nTime, nPeriod, nLength, nMode, nClipType, nTags);
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		nError = _TrnEventExportClip(nTime, nPeriod, nLength, nMode, nClipType, nTags);
+	ELSE
+		nError = 301;
+	END END
+	ClipSetMode(nOldClipType);
+	
+	SemSignal(hSem);
+	ErrSet(0);
+	RETURN nError;
+END
+
+INT
+FUNCTION
+_TrnPeriodicExportClip(INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nClipType, INT nTags)
+
+	INT		newLength;
+	INT		fieldWidth;
+	STRING	sFmt;
+	STRING	sListSep;										/* List seperator 										*/
+	INT		nError = 0;
+	INT		hFile;
+	INT		hFmt;
+	INT		i, j, k;
+	INT		nDataValid;
+	INT		nBlock;         								/* number of trend array blocks to be read      		*/
+	INT		nBlockSize;     								/* block size                                   		*/
+	INT		nStartBlockOffsetMS = -1 * ((nLength - 1) * nPeriod); /* Offset to the starting time in block	*/
+	INT		nEndBlockOffsetMS;								/* end time of the current block						*/
+	INT		nRoundedMilliseconds;							/* Times get rounded to hundreds of milliseconds 		*/
+	INT		MAXBLOCK = 256; 								/* set to an eighth of the sTrnArray[]          		*/
+	INT		nFactorMS = 1000;								/* We only use millisecond offsets if the span of the
+															   data is sufficiently small. Otherwise we have to 
+															   use offsets in seconds */
+	IF MAXIMUM_EXPORT_SPAN / 1000 < ((nLength - 1) * nPeriod) THEN
+		nFactorMS = 1;
+	END
+		
+	nStartBlockOffsetMS = nStartBlockOffsetMS * nFactorMS;
+	
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	IF nMode BITAND 0x0002 THEN
+		sFmt = "{TIME,16}";
+	ELSE 
+		sFmt = "{DATE,12}" + sListSep + "{TIME,16}";
+	END
+
+	FOR j = 0 TO nTags - 1 DO
+		newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+		IF newLength > 255 THEN
+			nTags = j;
+			nError = 344; // Format overflow
+		ELSE
+			fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+			sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+	
+	IF hFmt <> -1 THEN          
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END
+					
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+		END
+		ClipWriteLn(FmtToStr(hFmt));
+
+		nBlock = nLength / MAXBLOCK;
+		FOR k = 0 TO nBlock DO
+		
+			IF k = nBlock THEN
+				nBlockSize = nLength - nBlock * MAXBLOCK;
+			ELSE
+				nBlockSize = MAXBLOCK;                  
+			END
+			
+			nEndBlockOffsetMS = nStartBlockOffsetMS + (((nBlockSize - 1) * nPeriod) * nFactorMS);
+			
+			FOR i = 0 TO nTags - 1 DO
+				TrnGetTable(sTagArray[hTagArray[i]], _GetSecsFromOffsetMS(nTime, nEndBlockOffsetMS, nFactorMS), nPeriod, nBlockSize, aTrnArray[i*MAXBLOCK], nDisplayModeArray[hTagArray[i]], _GetMilliFromOffsetMS(nEndBlockOffsetMS, nFactorMS));
+				IsError();
+			END
+
+			FOR i = 0 TO nBlockSize - 1 DO
+				IF (nMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+					nDataValid = 0;
+					
+					FOR j = 0 TO nTags - 1 DO 
+						IF (TrnIsValidValue(aTrnArray[i + j * MAXBLOCK]) = TREND_DATA_VALID) THEN
+							nDataValid = 1;
+							j = nTags - 1;
+						END
+					END
+				ELSE
+					nDataValid = 1;
+				END
+				
+				IF (nDataValid = 1) THEN	
+					IF ((nPeriod < 1.0) OR (nMode BITAND 0x0008)) THEN
+						nRoundedMilliseconds = _GetMilliSinceMidnightFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS) / 100;
+						nRoundedMilliseconds = nRoundedMilliseconds * 100;
+						FmtSetField(hFmt, "TIME", TimeToStr(nRoundedMilliseconds, 6));
+					ELSE
+						FmtSetField(hFmt, "TIME", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 1));
+					END          
+					IF nMode BITAND 0x0002 THEN
+						; // don;t print date
+					ELSE
+						FmtSetField(hFmt, "DATE", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 9));
+					END
+						
+					FOR j = 0 TO nTags - 1 DO
+						FmtSetField(hFmt, sTagArray[hTagArray[j]],
+										TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 10, 5));
+					END
+					ClipWriteLn(FmtToStr(hFmt));
+				END
+				
+				nStartBlockOffsetMS = nStartBlockOffsetMS + (nPeriod * nFactorMS);
+			END
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	ClipWriteLn("");
+	
+	RETURN nError;
+END
+
+
+INT
+FUNCTION
+_TrnEventExportClip(INT nEvent, INT nPeriod, INT nLength, INT nMode, INT nClipType, INT nTags)
+
+	INT		newLength;
+	INT		fieldWidth;
+	STRING	sFmt;
+	STRING	sListSep;	/* List seperator */
+	INT		nError = 0;
+	INT		hFmt;
+	INT		nBlock;         /* number of trend array blocks to be read      */
+	INT		nBlockSize;     /* block size                                   */
+	INT		nBlockEvent;    /* earliest time in block                       */
+	INT		MAXBLOCK = 256; /* set to an eighth of the sTrnArray[]          */
+	INT		i, j, k;
+
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	IF nMode BITAND 0x0002 THEN
+		sFmt = "{EVENT,8}" + sListSep + "{TIME,16}";
+	ELSE 
+		sFmt = "{EVENT,8}" + sListSep + "{DATE,12}" + sListSep + "{TIME,16}";
+	END
+			
+	FOR j = 0 TO nTags - 1 DO
+		newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+		IF newLength > 255 THEN
+			nTags = j;
+			nError = 344; // Format overflow
+		ELSE
+			fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+			sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+	
+	IF hFmt <> -1 THEN                      
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END
+					
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+		END
+		ClipWriteLn(FmtToStr(hFmt));
+
+		nBlock = nLength / MAXBLOCK;
+		FOR k = 0 TO nBlock DO
+		
+			IF k = nBlock THEN
+				nBlockSize = nLength - nBlock * MAXBLOCK;
+			ELSE
+				nBlockSize = MAXBLOCK;                  
+			END
+			nBlockEvent = nEvent - (nLength-1) + (k * MAXBLOCK);
+			
+			FOR i = 0 TO nTags - 1 DO
+				TrnEventGetTable(sTagArray[hTagArray[i]], nBlockEvent + (nBlockSize - 1), nPeriod, 
+						nBlockSize, aTrnArray[i*MAXBLOCK], iTimeArray[i*MAXBLOCK], 0x02);
+				IsError();
+			END
+
+			FOR i = 0 TO nBlockSize - 1 DO
+				IF nMode BITAND 0x0002 THEN
+					FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+					FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+				ELSE
+					FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+					FmtSetField(hFmt, "DATE", TimeToStr(iTimeArray[i], 9));
+					FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+				END     
+				
+				FOR j = 0 TO nTags - 1 DO
+					FmtSetField(hFmt, sTagArray[hTagArray[j]], RealToStr(aTrnArray[i + j * MAXBLOCK], 10, 5));
+				END
+	
+				ClipWriteLn(FmtToStr(hFmt));
+			END
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	ClipWriteLn("");
+	
+	RETURN nError;
+END
+
+/*
+**      FUNCTION NAME: TrnExportDDE
+**
+**      This function exports trend data via DDE.
+**      Returns the number of samples exported.
+**
+*/
+
+INT
+FUNCTION
+TrnExportDDE(STRING sApplication, STRING sDocument, STRING sTopic,
+	INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nDDEType,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+	
+	INT	nTrendType;
+	INT	nError = 0;
+	INT	nTags;          /* number of tags to be exported                */
+	INT	hDDE;
+
+	IsError();
+	hDDE = DDEhInitiate(sApplication, sDocument);
+	IF hDDE = -1 THEN
+		RETURN 269;
+	END
+
+	IF _GetExportSemaphore() = 0 THEN
+		RETURN 298;
+	END
+
+	nTags = _TrnExpTagsToArray(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+	IF nTags = 0 THEN
+		DDEhTerminate(hDDE);
+		SemSignal(hSem);
+		RETURN 301;
+	END
+
+	_TrnExpDisplayModesToArray(nMode, nDisplayMode1, nDisplayMode2, nDisplayMode3,
+		nDisplayMode4, nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+		
+	nError = _TrnExpCheckTagTypes(nTags, 1);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	
+	IF nTime > TimeCurrent() THEN
+		nTime = TimeCurrent();
+	END
+	
+	ErrSet(1);
+	DDEhSetMode(hDDE, nDDEType);
+	nTrendType = _TrendTypeGet(sTagArray[hTagArray[0]], nDisplayModeArray[hTagArray[0]]);
+	IF nTrendType = TREND_TYPE_PERIODIC OR nTrendType = TREND_TYPE_PERIODIC_EVENT THEN
+		nError = _TrnPeriodicExportDDE(hDDE, sTopic, nTime, nPeriod, nLength, nMode, nDDEType, nTags);
+	ELSE IF nTrendType = TREND_TYPE_EVENT THEN
+		nError = _TrnEventExportDDE(hDDE, sTopic, nTime, nPeriod, nLength, nMode, nDDEType, nTags);
+	ELSE
+		nError = 301;
+	END END
+	DDEhTerminate(hDDE);
+
+	SemSignal(hSem);
+	ErrSet(0);
+	RETURN nError;
+END
+
+INT
+FUNCTION
+_TrnPeriodicExportDDE(INT hDDE, STRING sTopic, INT nTime, REAL nPeriod, INT nLength, INT nMode, INT nDDEType, INT nTags)
+
+	INT		newLength;
+	INT		fieldWidth;
+	STRING	sFmt;
+	STRING	sListSep;										/* List seperator 										*/
+	INT		nError = 0;
+	INT		hFile;
+	INT		hFmt;
+	INT		i, j, k;
+	INT		nDataValid;
+	INT		nBlock;         								/* number of trend array blocks to be read      		*/
+	INT		nBlockSize;     								/* block size                                   		*/
+	INT		nStartBlockOffsetMS = -1 * ((nLength - 1) * nPeriod); /* Offset to the starting time in block	*/
+	INT		nEndBlockOffsetMS;								/* end time of the current block						*/
+	INT		nRoundedMilliseconds;							/* Times get rounded to hundreds of milliseconds 		*/
+	INT		MAXBLOCK = 256; 								/* set to an eighth of the sTrnArray[]          		*/
+	INT		nFactorMS = 1000;								/* We only use millisecond offsets if the span of the
+															   data is sufficiently small. Otherwise we have to 
+															   use offsets in seconds */
+	IF MAXIMUM_EXPORT_SPAN / 1000 < ((nLength - 1) * nPeriod) THEN
+		nFactorMS = 1;
+	END
+	
+	nStartBlockOffsetMS = nStartBlockOffsetMS * nFactorMS;
+	
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	IF nMode BITAND 0x0002 THEN
+		sFmt = "{TIME,16}";
+	ELSE 
+		sFmt = "{DATE,12}" + sListSep + "{TIME,16}";
+	END
+
+	FOR j = 0 TO nTags - 1 DO
+		newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+		IF newLength > 255 THEN
+			nTags = j;
+			nError = 344; // Format overflow
+		ELSE
+			fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+			sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+	
+	IF hFmt <> -1 THEN
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END
+					
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+		END
+		DDEhWriteLn(hDDE, sTopic, FmtToStr(hFmt));
+
+		nBlock = nLength / MAXBLOCK;
+		FOR k = 0 TO nBlock DO
+		
+			IF k = nBlock THEN
+				nBlockSize = nLength - nBlock * MAXBLOCK;
+			ELSE
+				nBlockSize = MAXBLOCK;                  
+			END
+			
+			nEndBlockOffsetMS = nStartBlockOffsetMS + (((nBlockSize - 1) * nPeriod) * nFactorMS);
+			
+			FOR i = 0 TO nTags - 1 DO
+				TrnGetTable(sTagArray[hTagArray[i]], _GetSecsFromOffsetMS(nTime, nEndBlockOffsetMS, nFactorMS), nPeriod, nBlockSize, aTrnArray[i*MAXBLOCK], nDisplayModeArray[hTagArray[i]], _GetMilliFromOffsetMS(nEndBlockOffsetMS, nFactorMS));
+				IsError();
+			END
+
+			FOR i = 0 TO nBlockSize - 1 DO
+				IF (nMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+					nDataValid = 0;
+					
+					FOR j = 0 TO nTags - 1 DO 
+						IF (TrnIsValidValue(aTrnArray[i + j * MAXBLOCK]) = TREND_DATA_VALID) THEN
+							nDataValid = 1;
+							j = nTags - 1;
+						END
+					END
+				ELSE
+					nDataValid = 1;
+				END
+					
+				IF (nDataValid = 1) THEN	
+					IF (nPeriod < 1.0 OR (nMode BITAND 0x0008)) THEN
+						nRoundedMilliseconds = _GetMilliSinceMidnightFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS) / 100;
+						nRoundedMilliseconds = nRoundedMilliseconds * 100;
+						FmtSetField(hFmt, "TIME", TimeToStr(nRoundedMilliseconds, 6));
+					ELSE
+						FmtSetField(hFmt, "TIME", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 1));
+					END          
+					IF nMode BITAND 0x0002 THEN
+						; // don;t print date
+					ELSE
+						FmtSetField(hFmt, "DATE", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 9));
+					END
+	
+					FOR j = 0 TO nTags - 1 DO
+						FmtSetField(hFmt, sTagArray[hTagArray[j]],
+										TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 10, 5));
+					END                                     
+					DDEhWriteLn(hDDE, sTopic, FmtToStr(hFmt));
+				END
+				
+				nStartBlockOffsetMS = nStartBlockOffsetMS + (nPeriod * nFactorMS);
+			END
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	DDEhWriteLn(hDDE, sTopic, "");
+	
+	RETURN nError;
+END
+
+
+INT
+FUNCTION
+_TrnEventExportDDE(INT hDDE, STRING sTopic, INT nEvent, INT nPeriod, INT nLength, INT nMode, INT nDDEType, INT nTags)
+
+	INT		newLength;
+	INT		fieldWidth;
+	STRING	sFmt;
+	STRING	sListSep;	/* List seperator */
+	INT		nError = 0;
+	INT		hFmt;
+	INT		nBlock;         /* number of trend array blocks to be read      */
+	INT		nBlockSize;     /* block size                                   */
+	INT		nBlockEvent;    /* earliest time in block                       */
+	INT		MAXBLOCK = 256; /* set to an eighth of the sTrnArray[]          */
+	INT		i, j, k;
+
+	sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+
+	IF nMode BITAND 0x0002 THEN
+		sFmt = "{EVENT,8}" + sListSep + "{TIME,16}";
+	ELSE 
+		sFmt = "{EVENT,8}" + sListSep + "{DATE,12}" + sListSep + "{TIME,16}";
+	END
+			
+	FOR j = 0 TO nTags - 1 DO
+		newLength = StrLength(sFmt) + StrLength(sListSep) + StrLength(sTagArray[hTagArray[j]]) + 6;
+		IF newLength > 255 THEN
+			nTags = j;
+			nError = 344; // Format overflow
+		ELSE
+			fieldWidth = Max(StrLength(sTagArray[hTagArray[j]]) + 1, 16);
+			sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[j]] + "," + IntToStr(fieldWidth) + "}";
+		END
+	END
+	hFmt = FmtOpen("TrnExport", sFmt, 1);
+	
+	IF hFmt <> -1 THEN                      
+		IF nMode BITAND 0x0002 THEN
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "TIME", "TIME");
+		ELSE
+			FmtSetField(hFmt, "EVENT", "EVENT");
+			FmtSetField(hFmt, "DATE", "DATE");
+			FmtSetField(hFmt, "TIME", "TIME");
+		END
+					
+		FOR j = 0 TO nTags - 1 DO
+			FmtSetField(hFmt, sTagArray[hTagArray[j]], sTagArray[hTagArray[j]]);
+		END
+		DDEhWriteLn(hDDE, sTopic, FmtToStr(hFmt));
+
+		nBlock = nLength / MAXBLOCK;
+		FOR k = 0 TO nBlock DO
+		
+			IF k = nBlock THEN
+				nBlockSize = nLength - nBlock * MAXBLOCK;
+			ELSE
+				nBlockSize = MAXBLOCK;                  
+			END
+			nBlockEvent = nEvent - (nLength-1) + (k * MAXBLOCK);
+			
+			FOR i = 0 TO nTags - 1 DO
+				TrnEventGetTable(sTagArray[hTagArray[i]], nBlockEvent + (nBlockSize - 1), nPeriod, 
+						nBlockSize, aTrnArray[i*MAXBLOCK], iTimeArray[i*MAXBLOCK], 0x02);
+				IsError();
+			END
+
+			FOR i = 0 TO nBlockSize - 1 DO
+				IF nMode BITAND 0x0002 THEN
+					FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+					FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+				ELSE
+					FmtSetField(hFmt, "EVENT", (nBlockEvent + i));
+					FmtSetField(hFmt, "DATE", TimeToStr(iTimeArray[i], 9));
+					FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[i], 1));
+				END     
+				
+				FOR j = 0 TO nTags - 1 DO
+					FmtSetField(hFmt, sTagArray[hTagArray[j]], RealToStr(aTrnArray[i + j * MAXBLOCK], 10, 5));
+				END
+	
+				DDEhWriteLn(hDDE, sTopic, FmtToStr(hFmt));
+			END
+		END
+		FmtClose(hFmt);
+	ELSE
+		nError = IsError();
+	END
+	DDEhWriteLn(hDDE, sTopic, "");
+	
+	RETURN nError;
+END
+
+/*
+**      FUNCTION _GetExportSemaphore()
+**      
+**      Sets up a semaphore for the export functions to ensure 
+**      that none of them try to use the global data concurrently.
+**      The export funtions will abort if this call fails.
+**
+*/
+
+INT
+FUNCTION
+_GetExportSemaphore()
+
+	IF hSem = -1 THEN
+		hSem = SemOpen("SemExport", 1);
+	END
+	
+	IF SemWait(hSem, 120) = 0 THEN
+		RETURN 1;
+	ELSE
+		RETURN 0;
+	END
+END
+
+/*
+**      FUNCTION:       PageTrend()
+**
+**      This function builds a trend page with the specified pens.
+*/
+
+INT
+FUNCTION
+_PageTrend(STRING sPage = "", STRING sCluster = "", STRING sPen1 = "", STRING sPen2  = "", STRING sPen3  = "", 
+	  STRING sPen4 = "", STRING sPen5 = "", STRING sPen6 = "", STRING sPen7  = "",
+	  STRING sPen8 = "")
+
+	INT i;
+	INT nTags;
+	INT nError;
+
+	TrnSelect(WinNumber(), sPage, -3, sCluster);
+	nTags = _TrnExpTagsToArray(sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);		
+	nError = _TrnExpCheckTagTypes(nTags, 0, sCluster);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	_SetupTrendPage(nTags);
+	RETURN PageDisplay(sPage, sCluster);
+END
+
+
+/*
+**      FUNCTION:       TrendWin()
+**
+**      This function builds a trend page in a new window with the specified pens.
+*/
+
+INT
+FUNCTION
+_TrendWin(STRING sPage, INT X, INT Y, INT Mode, STRING sPen1 = "", 
+	 STRING sPen2 = "", STRING sPen3 = "", STRING sPen4 = "", 
+	 STRING sPen5 = "", STRING sPen6 = "", STRING sPen7 = "", 
+	 STRING sPen8 = "")
+
+	INT i;
+	INT nTags;
+	INT nError;
+
+	TrnSelect(-2, sPage, -3);
+	nTags = _TrnExpTagsToArray(sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	nError = _TrnExpCheckTagTypes(nTags, 0);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	_SetupTrendPage(nTags);
+	RETURN WinNewAt(sPage, X, Y, Mode);
+END
+
+
+/*
+**      FUNCTION:       TrendPopUp()
+**
+**      This function builds a Pop-up trend page in a new window with the specified pens.
+**      If we cannot get the mouse position then display the window in the center of the 
+**      screen.
+**
+*/
+
+INT
+FUNCTION
+_TrendPopUp(STRING sPopTrend = "", STRING sPen1 = "", STRING sPen2 = "", STRING sPen3 = "", STRING sPen4 = "", 
+	   STRING sPen5 = "", STRING sPen6 = "", STRING sPen7 = "", STRING sPen8 = "")
+
+	INT 	i;
+	INT 	nTags;
+	INT 	hWin;
+	INT		nError;
+	INT		x, y;
+	REAL	ScaleX, ScaleY;
+
+	TrnSelect(-2, sPopTrend, -3);
+	nTags = _TrnExpTagsToArray(sPen1, sPen2, sPen3, sPen4, sPen5, sPen6, sPen7, sPen8);
+	nError = _TrnExpCheckTagTypes(nTags, 0);
+	IF nError <> 0 THEN
+		SemSignal(hSem);
+		RETURN nError;
+	END
+	_SetupTrendPage(nTags);
+	DspGetMouse(x, y);
+	PageTransformCoords(WinNumber(), x, y, x, y, 0);
+	ScaleX = StrToReal(PageInfo(16));
+	ScaleY = StrToReal(PageInfo(17));
+	x = x / ScaleX;
+	y = y / ScaleY;
+	hWin = WinNewAt(sPopTrend, x, y, 1 + 8 + 32 + 256 + 512);
+	
+	RETURN hWin;        	
+END
+
+
+FUNCTION
+_SetupTrendPage(INT nTags)
+	STRING	sTag;
+	INT	i;
+		
+	FOR i = 1 TO 8 DO
+		IF i <= nTags THEN
+			sTag = sTagArray[hTagArray[i - 1]];
+		ELSE
+			sTag = "!";
+		END
+		TrnSetPen(-2, i, sTag);
+	END
+END
+
+
+/*
+**      FUNCTION NAME: _TrnExpTagsToArray
+**
+**      Finds which tags variables are being used and loads them into sTagArray[].
+**      Also builds the hTagArray which holds handles to all the valid tags. This
+**      is necessary for where pens 1,4 and 5 may be used rather than 1,2 and 3.
+**
+*/
+
+INT
+FUNCTION
+_TrnExpTagsToArray(STRING sTag1, STRING sTag2, STRING sTag3, STRING sTag4, STRING sTag5, STRING sTag6, STRING sTag7, STRING sTag8)
+
+	INT     nTags = 0;
+	INT     i;
+	
+	sTagArray[0] = sTag1;
+	sTagArray[1] = sTag2;
+	sTagArray[2] = sTag3;
+	sTagArray[3] = sTag4;
+	sTagArray[4] = sTag5;
+	sTagArray[5] = sTag6;
+	sTagArray[6] = sTag7;
+	sTagArray[7] = sTag8;
+	sTagArray[8] = "";
+	
+	FOR i = 0 TO 7 DO
+        hTagArray[i] = 8;               
+		IF StrLength(sTagArray[i]) <> 0 THEN
+			IF NOT _FindDuplicateTag(i) THEN
+				hTagArray[nTags] = i;
+				nTags = nTags + 1;
+			END                    
+		END
+	END
+
+	RETURN nTags;
+END
+
+/*
+**      FUNCTION NAME: _TrnExpCheckTagTypes
+**
+**      Ensures there is no mixing of trend types. ie. EVENT & PERIODIC
+**      Returns 0 if successfull, or the error if one has occured.
+**
+**		Should NOT be called until _TrnExpTagsToArray has been called.
+**
+*/
+
+INT
+FUNCTION
+_TrnExpCheckTagTypes(INT nTags, INT nCheckMode, STRING sCluster = "")
+
+	INT	i;
+	INT	nTrendType = -1;
+	INT	nTagType;
+	INT nError = 0;
+	INT nTagNumber;
+
+	FOR i = 0 TO nTags - 1 DO
+		IF nError = 0 THEN
+	        nTagNumber = hTagArray[i];           
+			IF (nCheckMode = 0) OR ((nDisplayModeArray[nTagNumber] BITAND DISPLAYMODE_DISPLAY_AS_PERIODIC) = 0) THEN
+				IsError();
+				ErrSet(1);
+				nTagType = TrnInfo(sTagArray[nTagNumber], 1, sCluster);
+				ErrSet(0);
+				nError = IsError();
+			ELSE
+				nTagType = TREND_TYPE_PERIODIC;
+			END
+			IF nError = 0 THEN
+				IF nTrendType = -1 THEN
+					nTrendType = nTagType;
+				END
+				IF nTrendType <> nTagType THEN
+					nError = 329; // cannot mix trend types
+				END
+			END 
+		END                   
+	END
+	
+	RETURN nError;
+END
+
+/*
+**	FUNCTION NAME: _TrnExpDisplayModesToArray
+**
+**	Copies a set of display modes to an array to make them easier to manipulate
+*/
+
+INT
+FUNCTION
+_TrnExpDisplayModesToArray(INT nMode, INT displayMode1, INT displayMode2, INT displayMode3, INT displayMode4,
+		INT displayMode5, INT displayMode6, INT displayMode7, INT displayMode8)
+	
+	nDisplayModeArray[0] = displayMode1;
+	nDisplayModeArray[1] = displayMode2;
+	nDisplayModeArray[2] = displayMode3;
+	nDisplayModeArray[3] = displayMode4;
+	nDisplayModeArray[4] = displayMode5;
+	nDisplayModeArray[5] = displayMode6;
+	nDisplayModeArray[6] = displayMode7;
+	nDisplayModeArray[7] = displayMode8;
+	nDisplayModeArray[8] = DEFAULT_EXPORT_DISPLAYMODE;
+
+	RETURN 0;
+END
+
+/*
+**      FUNCTION NAME: _FindDuplicateTag
+**
+**      Returns 1 if the tag sTagArray[nTag] exists in the
+**	elements 0..nTag-1. Otherwise returns 0.
+*/ 
+
+INT
+FUNCTION
+_FindDuplicateTag(INT nTag)
+
+INT     i;
+INT     found = 0;
+
+	FOR i = 0 TO nTag-1 DO
+		IF sTagArray[i] = sTagArray[nTag] THEN
+			found = 1;
+			i = nTag-1;
+		END
+	END
+	RETURN found;
+END
+
+
+/*
+**      FUNCTION NAME: _TrnExport
+**
+**      This function exports trend data for CTAPI trend query. It only
+**	support periodic trend and event trend.
+**	It exports periodic/event trend for the given time range.
+**	The periodic trend and event trend can be mixed in the exports.
+**
+**	Returns error status.
+*/
+
+INT
+FUNCTION
+_TrnExport(STRING sDevName, INT nTime, REAL nPeriod, INT nLength, INT nMode,
+	STRING sTag1 = "", STRING sTag2 = "", STRING sTag3 = "", STRING sTag4 = "", 
+	STRING sTag5 = "", STRING sTag6 = "", STRING sTag7 = "", STRING sTag8 = "",
+	INT nDisplayMode1 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode2 = DEFAULT_EXPORT_DISPLAYMODE,
+	INT nDisplayMode3 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode4 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode5 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode6 = DEFAULT_EXPORT_DISPLAYMODE, 
+	INT nDisplayMode7 = DEFAULT_EXPORT_DISPLAYMODE, INT nDisplayMode8 = DEFAULT_EXPORT_DISPLAYMODE)
+
+	STRING	sFile;
+	STRING	sFmt;
+	STRING	sListSep;	/* List seperator */
+	INT	hFile;
+	INT	hFmt;
+	INT	nTags;          /* number of tags to be exported        */
+	INT	nError = 0;
+	INT	i;
+	
+	IsError();
+
+	// Clear result file
+	sFile = "[data]:" + sDevName + ".csv";
+	IF FileExist(sFile) THEN
+		FileDelete(sFile);
+	END
+
+	IF _GetExportSemaphore() = 0 THEN
+		RETURN 298;
+	END
+
+	hFile = FileOpen(sFile,"w");
+	IF hFile <> -1  THEN
+
+		sListSep = WndGetFileProfile("Intl", "sList", ",", "win.ini");
+		
+		IF nMode BITAND 0x0002 THEN
+			sFmt = "{TIME,16}";
+		ELSE 
+			sFmt = "{DATE,12}" + sListSep + "{TIME,16}";
+		END
+
+		nTags = _TrnTagsToArray(sTag1, sTag2, sTag3, sTag4, sTag5, sTag6, sTag7, sTag8);
+			
+		_TrnExpDisplayModesToArray(nMode, nDisplayMode1, nDisplayMode2, nDisplayMode3,
+			nDisplayMode4, nDisplayMode5, nDisplayMode6, nDisplayMode7, nDisplayMode8);
+
+		FOR i = 0 TO nTags - 1 DO
+			sFmt = sFmt + sListSep + "{" + sTagArray[hTagArray[i]] + ",16}";
+		END
+
+		hFmt = FmtOpen("TrnExport", sFmt, 1);
+		IF hFmt <> -1 THEN
+			
+			DevModify(sDevName, sFmt, "", sFile, ASCII_DEV);
+
+			// Clean up tag fields
+			FOR i = 0 TO nTags - 1 DO
+				FmtSetField(hFmt, sTagArray[hTagArray[i]], "");
+			END
+
+			// Export periodic trends
+			nTags = _TrnTagsToHandle(TREND_TYPE_PERIODIC);
+			IF nTags > 0 THEN
+				nError = _ExportPeriodicTrn(hFile, hFmt, nTime, nPeriod, nLength, nMode, nTags);
+			END
+
+			// Export event trends
+			IF nError = 0 THEN
+				nTags = _TrnTagsToHandle(TREND_TYPE_EVENT);
+				IF nTags > 0 THEN
+					nError = _ExportEventTrn(hFile, hFmt, nTime, nPeriod, nLength, nMode, nTags);
+				END
+			END
+
+			FmtClose(hFmt);
+
+		ELSE
+			nError = IsError();
+		END
+
+		FileClose(hFile);       
+
+	ELSE
+		nError = IsError();
+	END
+
+	IF nError <> 0 AND FileExist(sFile) THEN
+		FileDelete(sFile);
+	END
+
+	SemSignal(hSem);
+
+	RETURN nError;
+END
+
+
+/*
+**      FUNCTION NAME: _ExportPeriodicTrn
+**
+**      This function exports trend data for CTAPI trend query. It exports
+**	periodic trend for the given time range.
+**
+**	It must be called by function _TrnExport().
+**
+**	Returns error status.
+*/
+
+INT
+FUNCTION
+_ExportPeriodicTrn(INT hFile, INT hFmt, INT nTime, REAL rPeriod, INT nLength, INT nMode, INT nTags)
+	
+	INT		nBlock;											/* number of trend array blocks to be read				*/
+	INT		nStartTime;
+	INT		nBlockSize;										/* block size											*/
+	INT		nTempTime;
+	INT		MAXBLOCK = 256;									/* maximum of samples for each read						*/
+	INT		nTimeAdj;
+	INT		nLengthAdj;
+	INT		i, j, k;
+	INT		nDataValid;
+	INT		nStartBlockOffsetMS = -1 * ((nLength - 1) * rPeriod); /* Offset to the starting time in block	*/
+	INT		nEndBlockOffsetMS;								/* end time of the current block						*/
+	INT		nRoundedMilliseconds;							/* Times get rounded to hundreds of milliseconds 		*/
+	INT		nFactorMS = 1000;								/* We only use millisecond offsets if the span of the
+															   data is sufficiently small. Otherwise we have to 
+															   use offsets in seconds */
+	IF MAXIMUM_EXPORT_SPAN / 1000 < ((nLength - 1) * rPeriod) THEN
+		nFactorMS = 1;
+	END
+	
+	nStartBlockOffsetMS = nStartBlockOffsetMS * nFactorMS;
+	
+	IF (hFile = -1) AND (hFmt = -1)  THEN
+		RETURN 274;
+	END
+
+	// Adjust the nLength if nTime is beyound the current time
+	nTempTime = TimeCurrent();
+	nStartTime = nTime - ((nLength - 1) * rPeriod);	// work out the start time
+	IF (nStartTime > nTempTime) OR (nLength <= 0) THEN
+		RETURN 0;
+	ELSE
+		IF nTime > nTempTime THEN
+			nTimeAdj = nTime - nTempTime;
+			nLengthAdj = IntToReal(nTimeAdj) / rPeriod;
+			IF (nLengthAdj * rPeriod) < IntToReal(nTimeAdj) THEN
+				nLengthAdj = nLengthAdj + 1;
+			END
+			nLength = nLength - nLengthAdj;
+			IF nLength = 0 THEN
+				nLength = 1;
+			END
+			nTime = nStartTime + ((nLength - 1) * rPeriod);
+		END
+	END
+		
+	nBlock = nLength / MAXBLOCK;
+	
+	FOR k = 0 TO nBlock DO
+
+		IF k = nBlock THEN
+			nBlockSize = nLength - nBlock * MAXBLOCK;
+		ELSE
+			nBlockSize = MAXBLOCK;                  
+		END
+			
+		nEndBlockOffsetMS = nStartBlockOffsetMS + (((nBlockSize - 1) * rPeriod) * nFactorMS);
+			
+		FOR i = 0 TO nTags - 1 DO
+			TrnGetTable(sTagArray[hTagArray[i]], _GetSecsFromOffsetMS(nTime, nEndBlockOffsetMS, nFactorMS), rPeriod, nBlockSize, aTrnArray[i*MAXBLOCK], nDisplayModeArray[hTagArray[i]], _GetMilliFromOffsetMS(nEndBlockOffsetMS, nFactorMS));
+			IsError();
+		END
+		
+		FOR i = 0 TO nBlockSize - 1 DO
+			IF (nMode BITAND TABLE_MODE_IGNORE_INVALID) THEN
+				nDataValid = 0;
+				
+				FOR j = 0 TO nTags - 1 DO 
+					IF (TrnIsValidValue(aTrnArray[i + j * MAXBLOCK]) = TREND_DATA_VALID) THEN
+						nDataValid = 1;
+						j = nTags - 1;
+					END
+				END
+			ELSE
+				nDataValid = 1;
+			END
+			
+			IF (nDataValid = 1) THEN			
+				FOR j = 0 TO nTags - 1 DO
+					FmtSetField(hFmt, sTagArray[hTagArray[j]],
+										TrendValueToString(aTrnArray[i + j * MAXBLOCK], nDisplayModeArray[hTagArray[j]], nMode, 10, 5));
+				END
+	
+				IF (rPeriod < 1.0 OR (nMode BITAND 0x0008)) THEN
+					nRoundedMilliseconds = _GetMilliSinceMidnightFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS) / 100;
+					nRoundedMilliseconds = nRoundedMilliseconds * 100;
+					FmtSetField(hFmt, "TIME", TimeToStr(nRoundedMilliseconds, 6));
+				ELSE
+					FmtSetField(hFmt, "TIME", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 1));
+				END          
+				IF nMode BITAND 0x0002 THEN
+					; // don't print date
+				ELSE
+					FmtSetField(hFmt, "DATE", TimeToStr(_GetSecsFromOffsetMS(nTime, nStartBlockOffsetMS, nFactorMS), 9));
+				END
+	
+				FileWriteLn(hFile, FmtToStr(hFmt));
+			END
+
+			nStartBlockOffsetMS = nStartBlockOffsetMS + (rPeriod * nFactorMS);
+			
+			// Check task running signal
+			IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+				i = nBlockSize;
+				k = nBlock;
+			ELSE
+				// Reduce CPU load
+				_CTAPIReduceCPULoad();
+			END
+		END
+
+	END
+
+	// Clean up tag fields
+	FOR i = 0 TO nTags - 1 DO
+		FmtSetField(hFmt, sTagArray[hTagArray[i]], "");
+	END
+	
+	RETURN IsError();
+END
+
+
+/*
+**      FUNCTION NAME: _ExportEventTrn
+**
+**      This function exports trend data for CTAPI trend query. It exports
+**      the number of event trends requested by length for the requested 
+**      EndTime (i.e. a start time of latest working back in time) with the 
+**      dataset returned in ascending date/time order.
+**
+**
+**	    NOTE:
+**	    It must be called by function _TrnExport().
+**
+**      Returns error status.
+*/
+
+INT
+FUNCTION
+_ExportEventTrn(INT hFile, INT hFmt, INT nEndTime, REAL nPeriod, INT nLength, INT nMode, INT nTags)
+	
+	REAL	nDuration = nPeriod * (nLength - 1);
+	INT		nStartTime = nEndTime - nDuration;
+	INT		nTableMode = 2;
+	INT		nStartEvent;
+	INT		nEndEvent;
+	INT		MAXBLOCK = 256;		/* maximum of samples for each read		*/
+	INT		nSampleCount;
+	INT		i, j;
+	INT		nSamplesInBlock;
+	INT		nSampleRet;
+	INT		nLastEventRetrieved;
+	
+	IF (hFile = -1) AND (hFmt = -1)  THEN
+		RETURN 274;
+	END
+
+	IF nMode BITAND 0x0004 THEN
+		nTableMode = 1 BITOR nTableMode;  // return TREND_DATA_GATED and TREND_DATA_NO_VALUES
+	END
+
+	FOR i = 0 TO nTags - 1 DO
+		nEndEvent			= _TrnTimeToEventOrPrev(sTagArray[hTagArray[i]], nEndTime);
+		nStartEvent			= _TrnTimeToEventOrNext(sTagArray[hTagArray[i]], nStartTime);
+		nLastEventRetrieved	= nStartEvent - 1;
+
+		IF (nEndEvent <> 0) AND (nStartEvent <> 0) THEN
+			WHILE nLastEventRetrieved < nEndEvent DO
+				nSamplesInBlock 	= Min(MAXBLOCK, (nEndEvent - nLastEventRetrieved));
+				nLastEventRetrieved	= nLastEventRetrieved + nSamplesInBlock;
+				nSampleRet			= TrnEventGetTable(	sTagArray[hTagArray[i]], nLastEventRetrieved, 0, nSamplesInBlock, aTrnArray[0],
+														iTimeArray[0], nTableMode); // Period is ignored (KB Q3172)
+				IsError();
+			
+				FOR j = 0 TO nSampleRet - 1 DO
+					IF ((iTimeArray[j] > 0) AND (nEndTime >= iTimeArray[j])) THEN
+						IF nMode BITAND 0x0002 THEN
+							FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[j], 1));
+						ELSE
+							FmtSetField(hFmt, "DATE", TimeToStr(iTimeArray[j], 9));
+							FmtSetField(hFmt, "TIME", TimeToStr(iTimeArray[j], 1));
+						END
+						
+						FmtSetField(hFmt, sTagArray[hTagArray[i]],
+									TrendValueToString(aTrnArray[j], nDisplayModeArray[hTagArray[i]], nMode, 10, 5));
+							
+						FileWriteLn(hFile, FmtToStr(hFmt));
+					END
+
+					// Check task running signal
+					IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+						j = nSampleRet;
+					ELSE
+						// Reduce CPU load
+						_CTAPIReduceCPULoad();
+					END
+				END
+				
+				// Check task running signal
+				IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+					nLastEventRetrieved = nEndEvent;
+				END
+			END
+			
+			// Check task running signal
+			IF TaskGetSignal(TaskHnd()) BITAND 0x0001 THEN
+				i = nTags;
+			END
+		END
+
+		// Clean up the current tag field
+		FmtSetField(hFmt, sTagArray[hTagArray[i]], "");
+	END
+	
+	RETURN IsError();
+END
+
+
+/*
+**      FUNCTION NAME: _TrnTagsToArray
+**
+**      This function validate the trend tags by its name.
+**
+**	Returns number of valid trend tags.
+*/
+
+INT
+FUNCTION
+_TrnTagsToArray(STRING sTag1, STRING sTag2, STRING sTag3, STRING sTag4, STRING sTag5, STRING sTag6, STRING sTag7, STRING sTag8)
+
+	INT	nTagType;
+	INT	nTags = 0;
+	INT	i;
+	
+	sTagArray[0] = sTag1;
+	sTagArray[1] = sTag2;
+	sTagArray[2] = sTag3;
+	sTagArray[3] = sTag4;
+	sTagArray[4] = sTag5;
+	sTagArray[5] = sTag6;
+	sTagArray[6] = sTag7;
+	sTagArray[7] = sTag8;
+	
+	sTagArray[8] = "";
+	
+	FOR i = 0 TO 7 DO
+        	hTagArray[i] = 8;
+        	nTagArray[i] = 0;
+		IF StrLength(sTagArray[i]) <> 0 THEN
+			IsError();
+			nTagType = TrnInfo(sTagArray[i], 1);
+			IF IsError() = 0 THEN
+				IF NOT _FindDuplicateTag(i) AND ((nTagType = TREND_TYPE_PERIODIC) OR (nTagType = TREND_TYPE_EVENT)) THEN
+					nTagArray[i] = nTagType;
+					hTagArray[nTags] = i;
+					nTags = nTags + 1;
+				END
+			END                     
+		END
+	END
+
+	RETURN nTags;
+END
+
+
+/*
+**      FUNCTION NAME: _TrnTagsToHandle
+**
+**      This function sets the trend tag handle array for
+**	the given trend type.
+**
+**	Returns number of trend tags.
+*/
+
+INT
+FUNCTION
+_TrnTagsToHandle(INT nTrendType)
+
+	INT	nTags = 0;
+	INT	i;
+
+	FOR i = 0 TO 7 DO
+        	hTagArray[i] = 8;
+		IF nTagArray[i] = nTrendType THEN
+			hTagArray[nTags] = i;
+			nTags = nTags + 1;
+		END
+	END
+
+	RETURN nTags;
+END
+ 
+/*
+**  FUNCTION NAME: _TrnTimeToEventOrPrev
+**
+**	This function gets the event number of the event at the
+**	given time for the given trend tag, or the previous event
+**	if there was no event at the given time.  If there is no
+**	previous event, the function returns 0 to indicate the error.
+**
+*/
+
+INT
+FUNCTION _TrnTimeToEventOrPrev(STRING sTag, INT nTime)
+
+	REAL	rTrnValue;
+	INT 	nSampleRet, iTrnTime, nDiff, nTestEvent;
+	INT	nDone 		= FALSE;
+	INT	nEvent		= 0;
+	INT	nStartEvent	= 1;
+	INT	nEndEvent	= TrnInfo(sTag, 6);
+	
+	IF nEndEvent > 0 THEN
+		WHILE nDone = FALSE DO
+			nDiff = nEndEvent - nStartEvent;
+			nTestEvent = nEndEvent - (nDiff / 2);
+			nSampleRet = TrnEventGetTable(sTag, nTestEvent, 0, 1, rTrnValue, iTrnTime, 3);				
+			IF nSampleRet = 1 THEN
+				IF iTrnTime <= nTime THEN
+					nEvent		= nTestEvent;
+					nStartEvent	= nTestEvent;
+
+					IF nDiff = 1 THEN
+						nDone = TRUE;
+					END
+				ELSE
+					IF nDiff = 1 THEN
+						nEndEvent = nStartEvent;
+					ELSE
+						nEndEvent = nTestEvent;
+					END
+				END
+			ELSE
+				nStartEvent = nTestEvent;
+			END
+			
+			IF nDiff = 0 THEN
+				nDone = TRUE;
+			END					
+		END
+	END
+	
+	RETURN nEvent;
+END
+
+/*
+**  FUNCTION NAME: _TrnTimeToEventOrNext
+**
+**	This function gets the event number of the event at the
+**	given time for the given trend tag, or the next event
+**	if there was no event at the given time.  If there is no
+**	next event, the function returns 0 to indicate the error.
+**
+*/
+
+INT
+FUNCTION _TrnTimeToEventOrNext(STRING sTag, INT nTime)
+
+	REAL	rTrnValue;
+	INT	nSampleRet, iTrnTime, nDiff, nTestEvent;
+	INT	nDone 		= FALSE;
+	INT	nEvent		= 0;
+	INT	nStartEvent 	= 1;
+	INT	nEndEvent	= TrnInfo(sTag, 6);
+	
+	IF nEndEvent > 0 THEN
+		WHILE nDone = FALSE DO
+			nDiff = nEndEvent - nStartEvent;
+			nTestEvent = nStartEvent + (nDiff / 2);
+			nSampleRet = TrnEventGetTable(sTag, nTestEvent, 0, 1, rTrnValue, iTrnTime, 3);				
+			IF nSampleRet = 1 THEN
+				IF iTrnTime >= nTime THEN
+					nEvent		= nTestEvent;
+					nEndEvent	= nTestEvent;
+					
+					IF nDiff = 1 THEN
+						nDone = TRUE;
+					END
+				ELSE
+					IF nDiff = 1 THEN
+						nStartEvent = nEndEvent;
+					ELSE
+						nStartEvent = nTestEvent;
+					END
+				END
+			ELSE
+				nStartEvent = nTestEvent;
+			END
+			
+			IF nDiff = 0 THEN
+				nDone = TRUE;
+			END					
+		END
+	END
+	
+	RETURN nEvent;
+END
+
+/*
+**  FUNCTION NAME: _GetSecsFromOffsetMS
+**
+**  This function returns the number of seconds since 1970, given 
+**  a base time in seconds since 1970, and an offset which will be in
+**	milliseconds if the nFactorMS is 1000 or seconds if the nFactorMS is 1.
+**
+*/
+
+INT 
+FUNCTION 
+_GetSecsFromOffsetMS(INT nTime, INT nOffsetMS, INT nFactorMS)
+	INT nOffsetInSecs = nOffsetMS / nFactorMS;
+	INT nOffsetTime = nTime + nOffsetInSecs;
+	
+	IF nFactorMS = 1000 AND nOffsetMS MOD 1000 < 0 THEN
+		nOffsetTime = nOffsetTime - 1;
+	END
+	
+	RETURN nOffsetTime; 
+END
+
+/*
+**  FUNCTION NAME: _GetMilliFromOffsetMS
+**
+** 	When the given offset is added to a time in 
+**  seconds since 1970, there is a resulting number of 
+**  milliseconds that can't be stored in the seconds since 1970 number.
+**
+**  This function calculates how many milliseconds that would be, given
+**  this offset, and returns it.  If nFactorMS is 1000 then the offset is in
+**	milliseconds so we have work to do, if nFactorMS is 1 then the offset is in
+**	seconds so the result has no choice but to be 0.
+**
+*/
+
+INT 
+FUNCTION 
+_GetMilliFromOffsetMS(INT nOffsetMS, INT nFactorMS)
+	INT nMilliseconds = 0;
+	
+	IF nFactorMS = 1000 THEN
+		nMilliseconds = nOffsetMS MOD 1000;
+		
+		IF nMilliseconds < 0 THEN
+			nMilliseconds = 1000 + nMilliseconds;
+		END
+	END
+	
+	RETURN nMilliseconds;
+END
+
+/*
+**  FUNCTION NAME: _GetMilliSinceMidnightFromOffsetMS
+**
+**  This function returns the number of milliseconds since midnight,
+**	given a base time which is in seconds since 1970, and an offset
+**	which will be in milliseconds if the nFactorMS is 1000 or seconds
+**	if the nFactorMS is 1.
+**
+*/
+
+INT
+FUNCTION
+_GetMilliSinceMidnightFromOffsetMS(INT nTime, INT nOffsetMS, INT nFactorMS)
+	INT nOffsetTime = _GetSecsFromOffsetMS(nTime, nOffsetMS, nFactorMS);
+	INT nOffsetMilli = _GetMilliFromOffsetMS(nOffsetMS, nFactorMS);
+	
+	RETURN ((nOffsetTime - TimeMidNight(nOffsetTime)) * 1000) + nOffsetMilli;
+END
+

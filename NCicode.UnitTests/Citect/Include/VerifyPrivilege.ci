@@ -1,0 +1,480 @@
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//	Copyright © 2009 Schneider Electric (Australia) Pty Ltd.
+//	All rights reserved.
+//
+// 	FILE:	VerifyPrivilege.ci
+//
+//	DESCRIPTION:
+//
+//		Contains a forms-based example implementation of authenticating 
+//		any single user and verifying that they meet a specified set of
+//		privileges.
+//
+//	PUBLIC FUNCTIONS:
+//
+//		VerifyPrivilegeForm
+//		VerifyPrivilegeTagWrite
+//				
+// 	NOTES: 
+//
+//		Requires Scada >= 7.10.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Verification form
+INT		hOperationField				= -1;
+INT		hVerificationForm			= -1;
+INT		hPasswordField 				= -1;
+INT		hUsernameField 				= -1;
+INT		hStatusField				= -1;
+INT		nXPos						= 0;		// x-position of the form.
+INT		nYPos						= 0;		// y-position of the form.
+INT		ndefaultFormMode			= 405;		// 1 + 4 + 16 + 128 + 256.  Default modes used when opening forms.
+STRING	sDefaultStatusPrompt		= "@(Approval awaiting a user with the specified privileges).";
+INT		bAuthenticationInProgress	= FALSE;	// Whether an authentication call is currently in progress.
+
+// Privileges to verify
+STRING	sPrivileges[8];						// Array of privileges that have been requested.
+INT		nTotalPrivileges			= 0;		// Total number of privileges specified.
+STRING	m_sGlobalPriv				= "";		// The global privilege to verify agaist.
+STRING	m_sAccess					= "";		// The access to verify against.
+
+// Operation results
+STRING	sApproved					= "APPROVED";
+STRING	sCancelled					= "CANCELLED";
+STRING	sCompleted					= "COMPLETED";
+STRING	sVerified					= "VERIFIED";
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyPrivilegeTagWrite
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays a form that allows any single user to enter their credentials in order
+//			to approve a write of a specific value to a specific tag.  These credentials are 
+//			checked against a specified set to ensure the user has the required privileges before 
+//			allowing the operation to proceed.
+//			The usernames can be Citect OR Windows users.
+//			
+// 		ARGUMENTS:
+//
+//			sTagName				- The name of the tag to which a write needs to be approved.
+//			sValueToWrite			- The value to write to the tag if approval succeeds.
+//			sLogDevice				- The name of a log device if logging is required, otherwise "".
+//			sAccess					- The required user viewable areas, or "" for none.
+//			sGlobalPriv				- The required global privilege, otherwise "".
+//			sPriv1					- The required user privilege for area 1, or "" for none.
+//			sPriv2					- The required user privilege for area 2, or "" for none.
+//			sPriv3					- The required user privilege for area 3, or "" for none.
+//			sPriv4					- The required user privilege for area 4, or "" for none.
+//			sPriv5					- The required user privilege for area 5, or "" for none.
+//			sPriv6					- The required user privilege for area 6, or "" for none.
+//			sPriv7					- The required user privilege for area 7, or "" for none.
+//			sPriv8					- The required user privilege for area 8, or "" for none.
+//			
+//     	RETURNED VALUE: 
+//
+//			Name of the user that met the required privileges (in which case the value was written to the specified tag), 
+//			otherwise "".
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PUBLIC STRING FUNCTION VerifyPrivilegeTagWrite(STRING sTagName, 
+											STRING sValueToWrite, 
+											STRING sLogDevice, 
+											STRING sAccess, 
+											STRING sGlobalPriv, 
+											STRING sPriv1, 
+											STRING sPriv2, 
+											STRING sPriv3, 
+											STRING sPriv4, 
+											STRING sPriv5, 
+											STRING sPriv6, 
+											STRING sPriv7, 
+											STRING sPriv8)
+								
+	STRING sUserName = "";
+	STRING sOperationDesc;
+	
+	IF (TagGetProperty(sTagName, "Type", 0) <> "") THEN
+		sOperationDesc = StrToLocalText("@(Writing value)") + " '" + sValueToWrite + "' " + StrToLocalText("@(to tag)") + " '" + sTagName + "'.";
+	
+		sUserName = VerifyPrivilegeForm(sOperationDesc, sLogDevice, sAccess, sGlobalPriv, sPriv1, sPriv2, sPriv3, sPriv4, sPriv5, sPriv6, sPriv7, sPriv8);
+
+		IF (sUserName <> "") THEN
+			TagWrite(sTagName, sValueToWrite);
+		END
+	ELSE
+		Message("VerifyPrivilegeTagWrite Error", "Invalid tag name specified.", 48);
+	END
+		
+	RETURN sUserName;
+END
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			VerifyPrivilegeForm
+//
+//     	GENERAL DESCRIPTION
+//
+//			Displays a form that allows a single user to enter their credentials.
+//			These credentials are checked against a specified set to ensure the 
+//			user has the required privileges before allowing the operation to proceed.
+//			The user can be a Citect OR Windows user.
+//			
+// 		ARGUMENTS:
+//
+//			sOperationDescription	- A description of the operation that requires approval.
+//			sLogDevice				- The name of a log device if logging is required, otherwise "".
+//			sAccess					- The required user viewable areas, or "" for none.
+//			sGlobalPriv				- The required global privilege, otherwise "".
+//			sPriv1					- The required user privilege for area 1, or "" for none.
+//			sPriv2					- The required user privilege for area 2, or "" for none.
+//			sPriv3					- The required user privilege for area 3, or "" for none.
+//			sPriv4					- The required user privilege for area 4, or "" for none.
+//			sPriv5					- The required user privilege for area 5, or "" for none.
+//			sPriv6					- The required user privilege for area 6, or "" for none.
+//			sPriv7					- The required user privilege for area 7, or "" for none.
+//			sPriv8					- The required user privilege for area 8, or "" for none.
+//			
+//     	RETURNED VALUE: 
+//
+//			The name of the user if the privilege verification succed, otherwise "".
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PUBLIC STRING FUNCTION VerifyPrivilegeForm(STRING sOperationDescription, 
+										STRING sLogDevice, 
+										STRING sAccess, 
+										STRING sGlobalPriv, 
+										STRING sPriv1, 
+										STRING sPriv2, 
+										STRING sPriv3, 
+										STRING sPriv4, 
+										STRING sPriv5, 
+										STRING sPriv6, 
+										STRING sPriv7, 
+										STRING sPriv8)
+
+	INT		nPixelsPerColumn	= 6;
+	INT		nPixelsPerRow		= 18;
+	INT 	bVerified 			= FALSE;
+	INT 	bCancelled			= FALSE;
+	INT		nPrivIndex			= 0;
+	INT		nPrivRow			= 3;	// Location of first privilege on the verification form.
+	INT		nExtraRows			= 0;
+	INT		bNoAccessOrGP		= FALSE;
+	STRING	sOperationCompleted = "";
+	STRING	sNotUsed			= "";
+	STRING 	sUsername			= "";
+	STRING	sLogResult			= "";
+	STRING	sStatusPrompt		= sDefaultStatusPrompt;
+	
+	// Calculate the offset of the form to the page
+	nXPos = (StrToInt(PageInfo(12)) - 60 * nPixelsPerColumn)/ 2;
+	nYPos = (StrToInt(PageInfo(13)) - (13 + nExtraRows + nTotalPrivileges) * nPixelsPerRow) / 2;
+	
+	// Adjust form position in case the parent page was moved out of the default posistion (0,0)
+	nXPos = nXPos + StrToInt(PageInfo(14));
+	nYPos = nYPos + StrToInt(PageInfo(15));
+
+	// Add the specified privileges to an array, ignoring empty strings.
+	nTotalPrivileges = CollatePrivileges(sPriv1, sPriv2, sPriv3, sPriv4, sPriv5, sPriv6, sPriv7, sPriv8);
+	m_sGlobalPriv = sGlobalPriv;
+	m_sAccess = sAccess;
+	
+	IF (StrLength(sAccess) > 0) THEN
+		nExtraRows = nExtraRows + 1;
+	END
+	
+	IF (StrLength(sGlobalPriv) > 0) THEN
+		nExtraRows = nExtraRows + 1;
+	END
+	
+	IF (nExtraRows = 0) THEN
+		nExtraRows = 1;
+		bNoAccessOrGP = TRUE;
+	END
+	
+	hVerificationForm = FormNew("@(Privilege Verification)", 60, 13 + nExtraRows + nTotalPrivileges, nDefaultFormMode);
+	FormPosition(nXPos, nYPos, 0);
+	FormPrompt(2, 1, "@(This operation requires a user with the following privileges:)");
+	
+	IF (StrLength(sAccess) > 0) THEN
+		FormPrompt(4, nPrivRow, "@(Access (viewable areas)):");
+		FormPrompt(36, nPrivRow, sAccess);
+		nPrivRow = nPrivRow + 1;
+	END
+	
+	IF (StrLength(sGlobalPriv) > 0) THEN
+		FormPrompt(4, nPrivRow, "@(Global privilege):");
+		FormPrompt(36, nPrivRow, sGlobalPriv);
+		nPrivRow = nPrivRow + 1;
+	END
+	
+	IF (bNoAccessOrGP) THEN
+		FormPrompt(4, nPrivRow, "<@(any valid user)>");
+		nPrivRow = nPrivRow + 1;
+	END
+	
+	FOR nPrivIndex = 0 TO 7 DO
+		IF (sPrivileges[nPrivIndex] <> "") THEN
+			FormPrompt(4, nPrivRow, "@(Areas for privilege) " + IntToStr(nPrivIndex + 1) + ":");
+			FormPrompt(36, nPrivRow, sPrivileges[nPrivIndex]);
+			nPrivRow = nPrivRow + 1;
+		END
+	END
+	
+	FormPrompt(2, nPrivRow + 1, "@(User Name):");
+	hUsernameField	= FormInput(18, nPrivRow + 1, sNotUsed, sNotUsed, 35);
+	FormPrompt(2, nPrivRow + 3, "@(Password):");
+	hPasswordField	= FormSecurePassword(20, nPrivRow + 3, sNotUsed, sNotUsed, 35);
+	
+	// Adjust the group box border to ensure it displays correctly...
+	IF (nPrivRow < 9) THEN
+		hOperationField	= FormGroupBox(0, 0, 60, nPrivRow + 4, "@(Operation): " + sOperationDescription);
+	ELSE
+		hOperationField	= FormGroupBox(0, 0, 60, nPrivRow + 3, "@(Operation): " + sOperationDescription);
+	END
+	
+	hStatusField	= FormPrompt(1, nPrivRow + 7, sStatusPrompt);
+	
+	FormButton(28, nPrivRow + 9, "  @(Approve)  ", PerformVerification, 0);
+	FormButton(44, nPrivRow + 9, "  @(Cancel)  ", CancelVerification, 0);
+		
+	WHILE (NOT bVerified AND NOT bCancelled) DO
+
+		FormSetInst(hVerificationForm, hStatusField, 0, "");
+		FormRead(1);
+		
+		sOperationCompleted = "";
+		WHILE (sOperationCompleted = "") DO
+			SleepMS(100);
+			FormGetInst(hVerificationForm, hStatusField, bVerified, sOperationCompleted);
+		END
+		
+		IF (sOperationCompleted = sCancelled) THEN
+			bCancelled = TRUE;
+		ELSE
+			IF (NOT bVerified) THEN
+				sStatusPrompt = "@(Password authentication failed or privileges not met).";
+				FormSetText(hVerificationForm, hPasswordField, "");	// Clear the password attempt
+			ELSE
+				sStatusPrompt = "@(Password authentication succeeded and privileges met).";
+			END
+			
+			FormSetText(hVerificationForm, hStatusField, sStatusPrompt);
+		END
+	END
+	
+	IF (bVerified) THEN
+		sUsername = FormGetText(hVerificationForm, hUsernameField);
+	END
+	// Attempt to log the approval of this operation.
+	LogOperationResult(sOperationDescription, sLogDevice, sUsername);
+	
+	FormDestroy(hVerificationForm);
+	
+	RETURN sUserName;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			CollatePrivileges
+//
+//     	GENERAL DESCRIPTION
+//
+//			Adds up to eight privileges to an array of privileges, skipping empty strings.
+//			
+// 		ARGUMENTS:
+//
+//			sPriv1..sPriv8			- User privileges as strings.
+//			
+//     	RETURNED VALUE: 
+//
+//			The total number of valid user privileges specified.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION CollatePrivileges(STRING sPriv1, STRING sPriv2, STRING sPriv3, STRING sPriv4, STRING sPriv5, STRING sPriv6, STRING sPriv7, STRING sPriv8)
+	INT nPrivilegeCount = 0;
+	INT nPrivilegeIndex = 0;
+
+	sPrivileges[0] = sPriv1;
+	sPrivileges[1] = sPriv2;
+	sPrivileges[2] = sPriv3;
+	sPrivileges[3] = sPriv4;
+	sPrivileges[4] = sPriv5;
+	sPrivileges[5] = sPriv6;
+	sPrivileges[6] = sPriv7;
+	sPrivileges[7] = sPriv8;
+
+	// Count the number of privileges that were specified.
+	FOR nPrivilegeIndex = 0 TO 7 DO
+		IF (StrLength(sPrivileges[nPrivilegeIndex]) > 0) THEN
+			nPrivilegeCount = nPrivilegeCount + 1;
+		END
+	END	
+		
+	RETURN nPrivilegeCount;	
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			LogOperationResult
+//
+//     	GENERAL DESCRIPTION
+//
+//			Writes a message to the specified log device recording the status of user that approval operation
+//			
+// 		ARGUMENTS:
+//
+//			sOperationDescription	- A description of the operation that requires approval.
+//			sLogDevice				- The name of a log device if logging is required, otherwise "".
+//			sUserName				- The username of the user that successfully approved the operation.
+//			sMsg					- Message text for logging. If "" specified, default approved message is logged
+//			
+//     	RETURNED VALUE: 
+//
+//			The error description, or "" if no error occurred.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE FUNCTION LogOperationResult(STRING sOperationDescription, STRING sLogDevice, STRING sUserName)
+	
+	STRING	slogResult	= "";
+	STRING	slogMessage	= "";
+	STRING	sDspMsgTitle = "";
+	STRING	sDspText     = "";
+	INT		hLogDevice	= -1;
+	INT		writeResult	= -1;
+		
+	slogMessage = TimeToStr(TimeCurrent(), 9) + " " + TimeToStr(TimeCurrent(), 1) + " @ " + GetEnv("ComputerName") + ": " + StrToLocalText("@(The operation)") + " '" + sOperationDescription + "' ";
+	IF sUserName <> "" THEN
+		slogMessage = slogMessage + StrToLocalText("@(was approved by the following person)") + ": " + sUserName + ".";
+		sDspMsgTitle = "@(Operation Approved) - ";
+		sDspText = "@(This operation has been approved).";
+	ELSE
+		slogMessage = slogMessage + StrToLocalText("@(privilege verification attempt cancelled).");
+		sDspMsgTitle = "@(Operation Cancelled) - ";
+		sDspText = "@(This operation has been cancelled).";
+	END
+
+	// Inform the user of the result.
+	FormNew(sDspMsgTitle + TimeToStr(TimeCurrent(), 9) + " @(at) " + TimeToStr(TimeCurrent(), 1), 70, 7, 149);
+	FormPosition(nXPos - 50, nYPos + 57, 0);
+	FormPrompt(2, 1, sDspText);
+		
+	IF (sLogDevice <> "") THEN
+
+		ErrSet(1);
+			
+		hLogDevice = DevOpen(sLogDevice, 0);
+		IF (hLogDevice <> -1) THEN
+		
+			writeResult = DevWriteLn(hLogDevice, slogMessage);
+			IF (writeResult <> 0) THEN
+				slogResult = "@(Failed to write to log device.  Error code): " + IntToStr(writeResult);
+			END
+		
+			DevClose(hLogDevice);
+		ELSE
+			slogResult = "@(Failed to open log device).";
+		END
+
+		ErrSet(0);
+		
+		// Check the result of the logging and construct a summary message for the user.
+		IF (StrLength(sLogResult) > 0) THEN
+			FormPrompt(2, 2, "@(Warning: A record of this operation could NOT be written).");
+			FormPrompt(2, 3, "@(Log device): " + sLogDevice + "     @(Error): " + sLogResult);
+		ELSE
+			FormPrompt(2, 2, "@(A log of this operation was successfully recorded)");
+			FormPrompt(2, 3, "@(to the device) '" + sLogDevice + "'.");
+		END
+	END
+	
+	FormGroupBox(0, 0, 70, 4, "@(Operation): " + sOperationDescription);
+	FormButton(59, 6, "    @(OK)    ", 0, 1);
+	FormRead(0);
+	
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			PerformVerification
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the user clicks 'OK' on the secure password form.
+//			This functions performs the authentication of the user's credentials.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION PerformVerification()
+
+	INT		bVerified 			= FALSE;
+	INT		nVerificationResult	= 0;
+	INT		nUserIndex			= 0;
+	INT		nErrorMsgCol		= 5;
+	STRING	sPassword			= "";
+	STRING	sUsername			= "";
+	STRING	sNotUsed			= "";
+	STRING	sErrorMsg			= "";
+
+	bAuthenticationInProgress = TRUE;
+
+	FormGetData(hVerificationForm);
+	sPassword = FormGetText(hVerificationForm, hPasswordField);
+	sUsername = FormGetText(hVerificationForm, hUsernameField);
+		
+	FormSetText(hVerificationForm, hStatusField, "@(Please wait) ...");
+	
+	nVerificationResult = UserVerify(sUsername, sPassword, m_sAccess, m_sGlobalPriv, sPrivileges[0], sPrivileges[1], sPrivileges[2], sPrivileges[3], sPrivileges[4], sPrivileges[5], sPrivileges[6], sPrivileges[7]);
+	bVerified = (nVerificationResult = 0);
+	
+	FormSetText(hVerificationForm, hStatusField, "");
+	FormSetInst(hVerificationForm, hStatusField, bVerified, sCompleted);
+
+	bAuthenticationInProgress = FALSE;
+	
+	RETURN 0;
+END
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		FUNCTION NAME	
+//			CancelAuthentication
+//
+//     	GENERAL DESCRIPTION
+//
+//			Event handler for when the 'Cancel' button on the authentication form is clicked.
+//			
+// 		ARGUMENTS:
+//
+//			None.
+//			
+//     	RETURNED VALUE: 
+//
+//			0 always.
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+PRIVATE INT FUNCTION CancelVerification()
+
+	// Don't allow the cancel button to be clicked if there is an authentication operation in progress.
+	IF (NOT bAuthenticationInProgress) THEN
+		FormSetInst(hVerificationForm, hStatusField, 0, sCancelled);
+	END
+	
+	RETURN 0;
+END

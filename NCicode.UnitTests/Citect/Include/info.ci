@@ -1,0 +1,769 @@
+/*
+**	FILE:		Info.CI
+**
+**	DESCRIPTION:	This file contains the following functions for displaying debug info forms.
+**
+**			IODeviceStats()
+**			InfoForm()
+**			InfoFormAn()
+**
+**	NOTES:		Moved InfoForm Functions from System Directory into this file 12/96.
+*/
+
+
+
+//      ---------------------- MODULE VARIABLES - IODeviceStats Functions --------------------
+
+INT	MAX_DEVICE_ID		= 16383;		// Largest valid device identifier
+INT	hIODevice;			        // IODevice number
+STRING	sIODevice;			        // IODevice name
+INT	hIODeviceForm           = BAD_HANDLE;	// form handle
+INT	hIODeviceField[12];		        // field handles
+STRING	sIODeviceFieldData[12];		        // field dynamic data
+STRING	sIODeviceFieldText[12] =
+	"Name",
+	"Status on Client",
+	"Startup Mode",
+	"Generic Error",
+	"Driver Error (Hex)",
+	"Error Count",
+	"Restarts",
+	"Min Response Time",
+	"Max Response Time",
+	"Avg Response Time",
+	"No of Reads",
+	"Total CPU Usage (%)";
+
+//      ---------------------MODULE VARIABLES - InfoForm Functions --------------------------
+
+
+INT	hWriteField		= BAD_HANDLE;  	// Handle of Tag Write Field
+INT 	hExpTextField		= BAD_HANDLE;  	// Handle of Expression Text Field
+INT	hResTextField		= BAD_HANDLE;  	// Handle of Result Text Field
+INT	hContextPrompt		= BAD_HANDLE;  	// Handle of Context Prompt
+INT 	hInfo			= BAD_HANDLE;  	// Handle for DspInfoNew
+INT 	hForm			= BAD_HANDLE;  	// Handle of Form
+
+INT     iTagIndex		= 0;		// index into tag in the variable information block
+INT     iExpressionIndex	= 0;		// index into expression in the variable information block
+INT     iNumberOfTags		= 0;		// Number of tags in given expression at An
+INT     iNumberOfExpressions	= 0;		// Number of expressions at An	
+INT 	iRowOffset		= 0;	        // Row offset for start of tag fields
+INT	iArrayTagOffset	        = 0;		// Tag Array Offset
+INT	bOffsetError		= 0;		// Tag Array Offset error Flag 
+	
+STRING  sTagname 		= "";		// current tag
+STRING  sValue 	        	= "";		// Buffer for Value to Write to Tag
+
+INT	hEditField[ 15];			// handles to form fields
+
+
+//      Tag Form Field  names and Descriptions	
+
+STRING  sEditField[13][2] =
+				"Cluster", 		"Cluster",
+				"Name",			"Variable Tag Name",			
+				"Type", 		"Data Type", 	
+				"Unit", 		"I/O Device", 		
+				"Addr", 	"Address", 	
+				"Raw_Zero", 	"Raw Zero Scale", 	
+				"Raw_Full", 	"Raw Full", 	
+				"Eng_Zero", 	"Engineering Zero Scale", 	
+				"Eng_Full",		"Eng Full", 	
+				"Eng_Value",	"Engineering Value", 	
+				"Eng_Units", 	"Engineering Units", 	
+				"Comment", 		"Comment";	
+
+STRING  sInputText[15];				// Text buffers for form fields
+
+
+
+/*
+**	FUNCTION:	IODeviceStats()
+**
+**	DESCRIPTION	This function displays stats on each of the IODevices in a form.
+**			The form is updated each second until the user closes the form.
+**			You may select a IODevice by pressing the next, prev or search buttons.
+**
+**	AUTHOR:		Tom Purcell
+**
+**	DATE:		November 1993
+**
+**	REVISION:							DATE:
+**
+**	1.	"prev" and "search" functions added			09/94
+**		to the IODeviceStats() function.
+**	2.	labels on form changed,					02/96
+**		return value for Status on client improved
+**      3.      Modified to ensure single instance only                 12/96
+**              Added PRIVATE / PUBLIC Functions
+**	NOTES:
+**
+*/
+
+PUBLIC
+INT
+FUNCTION
+IODeviceStats()
+
+	STRING	sBuffer;
+	INT	i;
+
+        IF FormActive(hIODeviceForm) THEN
+                FormGoto(hIODeviceForm);
+                Return(0);
+        END
+
+	hIODevice = 0;
+	_GetNextIODevice();
+	hIODeviceForm = FormNew("I/O Device Statistics", 34, 17, 5);
+	FOR i = 0 TO 11 DO
+        	FormPrompt(2, i, sIODeviceFieldText[i]);
+		hIODeviceField[i] = FormField(22, i, 12, 1, 3, sBuffer, "      ", 0);
+	END
+	FormButton( 5, 13, "  Next ", _GetNextIODevice, 0);
+	FormButton(20, 13, "  Prev ", _GetPrevIODevice, 0);
+	FormButton(20, 15, " Close ", 0, 1);
+	FormButton( 5, 15, " Search", _IODeviceSearch, 0);
+	FormRead(1);
+	WHILE FormActive(hIODeviceForm) DO
+		_RefreshIODeviceStats();
+		Sleep(1);
+	END
+END
+
+
+/*
+**	FUNCTION	_RefreshIODeviceStats
+**
+**	This function get the stats from the IODevices and
+**	displays them on the form.
+**
+*/
+
+PRIVATE
+INT
+FUNCTION
+_RefreshIODeviceStats()
+
+	INT	iStatus;
+	INT	iMode;
+	INT	i;
+
+	sIODeviceFieldData[0] = sIODevice;
+	sIODeviceFieldData[1] = IntToStr(CitectInfo("IODevice", sIODevice, 0));
+	FOR i = 2 TO 10 DO
+		sIODeviceFieldData[i] = IntToStr(CitectInfo("IODevice", sIODevice, i));
+	END
+	iStatus	= StrToInt(sIODeviceFieldData[1]);
+	IF iStatus = 1 THEN
+		sIODeviceFieldData[1] = "Running";
+	ELSE IF iStatus = 2 THEN
+		sIODeviceFieldData[1] = "Standby";
+	ELSE IF iStatus = 16 THEN
+		sIODeviceFieldData[1] = "Offline";
+	ELSE IF iStatus = 128 THEN
+		sIODeviceFieldData[1] = "Remote";
+	ELSE
+		sIODeviceFieldData[1] = "Not Found";
+	END END END END
+	iMode = StrToInt(sIODeviceFieldData[2]);
+	IF iMode THEN
+		sIODeviceFieldData[2] = "Standby";
+	ELSE
+		sIODeviceFieldData[2] = "Primary";
+	END
+        sIODeviceFieldData[4]  = HexToStr(sIODeviceFieldData[4], 7);
+        sIODeviceFieldData[11] = IntToStr(CitectInfo("General", "General", 0));
+	FOR i = 0 TO 11 DO
+		FormSetText(hIODeviceForm, hIODeviceField[i], sIODeviceFieldData[i]);
+	END
+	RETURN 0;
+END
+
+/*
+**	FUNCTION	_GetNextIODevice
+**
+**	This function gets the next valid IODevice.
+**
+*/
+
+PRIVATE
+INT
+FUNCTION
+_GetNextIODevice()
+       	
+       	sIODevice = "";
+       	WHILE sIODevice = "" DO
+		IF hIODevice < MAX_DEVICE_ID THEN
+			hIODevice = hIODevice + 1;
+		ELSE
+			hIODevice = 0;
+		END
+		sIODevice = IODeviceInfo(hIODevice, 0);
+	END
+	_RefreshIODeviceStats();
+	RETURN 0;
+END
+
+/*
+**	FUNCTION	_GetPrevIODevice
+**
+**	This function gets the previous valid IODevice.
+**
+*/
+
+PRIVATE
+INT
+FUNCTION
+_GetPrevIODevice()
+       	
+       	sIODevice = "";
+       	WHILE sIODevice = "" DO
+		IF hIODevice > 0 THEN
+			hIODevice = hIODevice - 1;
+		ELSE
+			hIODevice = MAX_DEVICE_ID;
+		END
+		sIODevice = IODeviceInfo(hIODevice, 0);
+	END
+	_RefreshIODeviceStats();
+	RETURN 0;
+END
+
+/*
+**	FUNCTION	_IODeviceSearch()
+**
+**	This function will search for a given IODevice name.
+**
+*/
+
+PRIVATE
+INT
+FUNCTION
+_IODeviceSearch()
+
+	STRING	search;
+	STRING	sTemp;
+	INT	hForm;
+	INT	hRead;
+	INT	iTemp;
+       	
+       	iTemp = hIODevice;
+       	sTemp = sIODevice;
+       	FormNew("IODevice Search", 40, 4, 5);
+       	FormInput(1, 1, "Input IODevice Name", search, 20);
+       	FormButton(10, 3, "   OK   ", 0, 1);
+       	FormButton(22, 3, " Cancel ", 0, 2);
+       	hRead = FormRead(0);
+       	IF  NOT hRead THEN 
+       		IF (search <> "") THEN
+       	        	hIODevice = 0;
+	       		WHILE NOT (sIODevice = search) DO
+				sIODevice = IODeviceInfo(hIODevice, 0);
+				IF hIODevice < MAX_DEVICE_ID THEN
+					hIODevice = hIODevice + 1;
+				ELSE
+					hIODevice = iTemp;
+					sIODevice = sTemp;
+					Message("Search", search + "  not found",48);
+					FormGoto(hIODeviceForm);
+					RETURN 0; 
+				END
+			END
+		ELSE
+			Message("Search", search + "  not found",48);
+			FormGoto(hIODeviceForm);
+			RETURN 0;
+		END
+	END
+	_RefreshIODeviceStats();
+	FormGoto(hIODeviceForm);
+	RETURN 0;
+END
+
+
+//      ---------------------------------  InfoForm Functions --------------------------------
+
+/*
+**	FUNCTION :		InfoForm
+**
+**      DESCRIPTION:            Obtains the AN at the current mouse position then calls
+**                              the InfoFormAn Function
+**
+**	REVISION:  		2.0
+**	DATE:			16 Dec 1996
+**	BY:			Steve Schilg
+**	COMMENTS:		Rewritten to 	1. allow writes to variables.
+**						2. display long expressions, tagnames, addresses etc.
+**						3. Display more tags.
+**						4. allow different privilege levels for the write button (DK)
+**
+**
+**	RETURNED VALUE:	0 if Successful,  -1 if no animation exists, -2 if form already active
+**
+**	NOTES:
+*/
+
+PUBLIC
+INT
+FUNCTION 
+InfoForm(INT mode=0)
+
+	INT 	iError			= 0;
+	INT	x			= 0;
+	INT	y			= 0;
+	INT	hAn			= 0;
+	INT	hParentAn		= 0;
+	
+	DspGetMouse(x, y);
+	hAn = DspGetAnFromPoint(x, y);
+	IF hAn = 0 THEN
+		hAn = DspGetNearestAn(x, y);
+	END
+	IF hAn > 0 THEN
+		hParentAn = DspGetParentAn(hAn);
+
+		SELECT CASE hParentAn
+			CASE IS > 0
+				SELECT CASE mode
+					CASE 0
+					iError = InfoFormAn(hParentAn, 0);
+					CASE ELSE
+					iError = InfoFormAn(hParentAn, 1);
+				END SELECT
+			CASE ELSE
+				SELECT CASE mode
+					CASE 0
+					iError = InfoFormAn(hAn, 0);
+					CASE ELSE
+					iError = InfoFormAn(hAn, 1);
+				END SELECT
+		END SELECT
+
+	END
+	Return(iError);
+END
+
+/*
+**      FUNCTION:       InfoFormAn
+**
+**	DESCRIPTION : 	This function creates a form to be displayed on the
+**		      	screen and fills it with all the field data associated
+**		      	with the variables database.
+**		      	The function does not exit immediately but sits in a loop
+**		      	continuously updating the fields who's data may change.
+**			The mode passed into the function determines the status of
+**			the write button. It also allows for backward compatibility.(DK)
+**
+**	RETURNED VALUE:	0 if Successful,  -1 if no animation exists, -2 if form already active
+**
+*/
+
+PUBLIC
+INT
+FUNCTION
+InfoFormAn(INT AN, INT mode=0)
+
+	INT	bHasMultipleTags        = FALSE;
+	INT	bHasMultipleExpressions = FALSE;
+	INT 	FormWidth 		= 56;
+	INT 	FormHeight		= 3;
+	INT 	FormDelta		= 0;
+	STRING	sExpText		= "";
+	STRING	sResText		= "";
+
+	IF FormActive(hForm) THEN
+                FormGoto(hForm);
+		Return(-2);
+	END
+	
+	sValue			= "";
+	sTagname	 	= "";
+	hInfo    = DspInfoNew(An);
+
+ 	IF (hInfo > -1) THEN
+		iNumberOfExpressions = StrToInt(DspInfo(hInfo, 7, 0));
+
+		IF (iNumberOfExpressions > 0) THEN
+			IF (iNumberOfExpressions > 1) THEN
+				bHasMultipleExpressions = TRUE;
+			END
+
+			FOR iExpressionIndex = 0 TO iExpressionIndex < iNumberOfExpressions DO
+				iNumberOfTags = StrToInt(DspInfo(hInfo, 8, iExpressionIndex));
+
+				IF (iNumberOfTags > 1) THEN
+					bHasMultipleTags = TRUE;
+					iExpressionIndex = iNumberOfExpressions;
+				END
+			END
+
+			IF ((bHasMultipleTags) AND (bHasMultipleExpressions)) THEN
+				FormDelta = 1;
+			END
+
+			iExpressionIndex = 0;
+			iTagIndex = 0;
+			iNumberOfTags = StrToInt(DspInfo(hInfo, 8, iExpressionIndex));
+	
+			IF ((bHasMultipleExpressions) OR (iNumberOfTags > 0)) THEN
+				FormHeight = 15 + FormDelta;
+			END
+	
+			hForm = FormNew(DspInfo(hInfo, 0, 0) + " Information", FormWidth, FormHeight, 1);
+
+			sExpText = DspInfo(hInfo, 1, iExpressionIndex);
+			hExpTextField = FormInput(0, 0, "Expression            ", sExpText, 32);
+	
+			sResText = DspInfo(hInfo, 2, iExpressionIndex);
+			hResTextField = FormInput(0, 1, "Result                ", sResText, 32);
+		
+			sTagname = DspInfo(hInfo, 10, iTagIndex);
+			iArrayTagOffset = _InfoFormArrayTagOffset();
+			iRowOffset = 2;	
+		
+			IF ((bHasMultipleExpressions) OR (iNumberOfTags > 0)) THEN
+				FormPrompt(0, 10 + iRowOffset, "Context : ");
+				hContextPrompt = FormPrompt(24, 10 + iRowOffset, "                                ");
+				FormSetText(hForm, hContextPrompt, DspInfo(hInfo, 6, iExpressionIndex));
+				
+				_InfoField( 0, 0,  0, 32, 22);	!Cluster
+				_InfoField( 0, 1,  1, 32, 22);	!Tag
+				_InfoField( 0, 2,  2, 16, 22);	!Type
+				_InfoField( 0, 3,  3, 16, 22);	!Unit	
+				_InfoField( 0, 4,  4, 16, 22);	!Addr	
+				_InfoField( 0, 5,  5, 10, 22);	!Raw Zero
+				_InfoField(36, 5,  6, 10,  8);	!Raw Full
+				_InfoField( 0, 6,  7, 10, 22);	!Eng Zero
+				_InfoField(36, 6,  8, 10,  8);	!Eng Full
+				_InfoField( 0, 7,  9, 32, 22);	!Eng Value
+				_InfoField( 0, 8, 10, 10, 22);	!Eng Units
+				_InfoField( 0, 9, 11, 32, 22);	!Comment	
+				
+				hWriteField	= BAD_HANDLE;
+				IF mode = 0 THEN
+					FormButton(FormWidth - 10, FormHeight - FormDelta - 2,  "  Write  ", _InfoFormWriteTag, 0);
+					hWriteField = FormEdit(0, FormHeight - FormDelta - 2, sValue, FormWidth - 11);
+				END
+
+				IF (bHasMultipleTags) THEN
+					FormButton(22, FormHeight - FormDelta - 1, "  Next Variable  ", _InfoFormNextVar, 0);
+					FormButton(0,  FormHeight - FormDelta - 1, "  Prev Variable  ", _InfoFormPrevVar, 0);
+				END
+	
+				IF (bHasMultipleExpressions) THEN
+					FormButton(22, FormHeight - 1, " Next Expression ", _InfoFormNextExpression, 0);
+					FormButton(0,  FormHeight - 1, " Prev Expression ", _InfoFormPrevExpression, 0);
+				END
+
+				FormButton(FormWidth - 10, FormHeight - FormDelta - 1, "  Close  ", 0, 2);
+		
+            	    		FormRead(1);
+								
+				WHILE (FormActive(hForm) AND DspInfoValid(hForm)) DO
+					FormSetText(hForm, hContextPrompt, DspInfo(hInfo, 6, iExpressionIndex));
+	
+					sExpText = DspInfo(hInfo, 1, iExpressionIndex);
+					FormSetText(hForm, hExpTextField, sExpText);
+					sResText = DspInfo(hInfo, 2, iExpressionIndex);
+					FormSetText(hForm, hResTextField, sResText);
+
+					IF (bOffsetError = 0) THEN	
+						IF (sTagname = "") THEN
+							FormSetText(hForm, hEditField[ 9], "");
+						ELSE
+							FormSetText(hForm, hEditField[ 9], TagRead(sTagname, iArrayTagOffset));
+						END
+					ELSE
+						FormSetText(hForm, hEditField[ 9], "Cannot resolve array offset");
+					END
+
+					Sleep(1);
+				END			
+			ELSE
+				FormButton((FormWidth / 2) - 3, FormHeight - 1, " Close ", 0, 2);
+				FormRead(0);
+			END
+		END
+	END
+        DspInfoDestroy(hInfo);
+
+	IF hInfo > -1 THEN
+		Return(0);
+	ELSE
+		Return(hInfo);
+	END
+END
+
+/*
+**	FUNCTION:	_InfoField
+**	DESCRIPTION:	Builds each row in the form
+**      iColumn		Column Where Form Input is located
+**	iRow		Row Where Form Input is located
+**	iIndex		Array pointer to data
+**	iWidth		Width of FormInput field
+**	iPromptWidth	Width of Prompt (padded to get fields to align vertically)
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoField(INT iColumn, Int iRow, INT iIndex,  INT iWidth, INT iPromptWidth)
+
+	sInputText[iIndex] = DspInfoField(hInfo, sTagname, sEditField[iIndex][0]);
+	sEditField[iIndex][1] = StrPad(sEditField[iIndex][1], " ", iPromptWidth);
+	hEditField[iIndex] = FormInput(iColumn, iRowOffset + iRow, sEditField[iIndex][1], sInputText[iIndex], iWidth);
+	Return(0);
+END
+
+/*
+**	FUNCTION	_InfoFormNextVar
+**	DESCRIPTION	Callback function for Next button. Increments the index to next tag.
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoFormNextVar()
+
+	IF (iTagIndex < (iNumberOfTags - 1)) THEN
+		iTagIndex = iTagIndex + 1; 
+		sTagname = DspInfo(hInfo, 10, iTagIndex);
+		_InfoFormUpdateForm();
+	END
+
+	Return(0);
+END
+
+/*
+**     FUNCTION:       _InfoFormPrevVar
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoFormPrevVar()
+
+	IF (iTagIndex > 0) THEN
+		iTagIndex = iTagIndex - 1; 
+		sTagname = DspInfo(hInfo, 10, iTagIndex);
+		_InfoFormUpdateForm();
+	END
+
+	Return(0);
+END
+
+/*
+**	FUNCTION	_InfoFormNextExpression
+**	DESCRIPTION	Callback function for Next button. Increments the index to next expression.
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoFormNextExpression()
+
+	IF (iExpressionIndex < (iNumberOfExpressions - 1)) THEN
+		iExpressionIndex = iExpressionIndex + 1; 
+		iNumberOfTags = DspInfo(hInfo, 8, iExpressionIndex);
+		sTagname = DspInfo(hInfo, 10, iTagIndex);
+		iTagIndex = 0;
+		_InfoFormUpdateForm();
+	END
+
+	Return(0);
+END
+
+/*
+**     FUNCTION:       _InfoFormPrevExpression
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoFormPrevExpression()
+
+	IF (iExpressionIndex > 0) THEN
+		iExpressionIndex = iExpressionIndex - 1; 
+		iNumberOfTags = DspInfo(hInfo, 8, iExpressionIndex);
+		sTagname = DspInfo(hInfo, 10, iTagIndex);
+		iTagIndex = 0;
+		_InfoFormUpdateForm();
+	END
+
+	Return(0);
+END
+
+/*
+**      FUNCTION:       _InfoFormUpdateForm()
+**	DESCRIPTION:	Updates the form when the tag is changed
+**
+*/
+
+PRIVATE
+FUNCTION
+_InfoFormUpdateForm()
+
+	INT 	i;
+
+	sTagname = DspInfo(hInfo, 10, iTagIndex);	// get next tagname
+	iArrayTagOffset = _InfoFormArrayTagOffset();
+
+	FOR i = 0 TO 11	DO
+		sInputText[i] = DspInfoField(hInfo, sTagname, sEditField[i][0]);
+		FormSetText(hForm, hEditField[i], sInputText[i]);
+	END
+
+	IF (sTagname = "") THEN
+		sValue = "";
+	ELSE
+		sValue = TagRead(sTagname, iArrayTagOffset);
+	END
+
+	FormSetText(hForm, hWriteField, sValue);	
+	FormSetData(hForm);
+END
+
+/*
+**	FUNCTION:	_InfoFormWriteTag
+**      DESCRIPTION:    Writes to Tag then reads back value from tag 
+**                      and displays it in the Write field
+*/
+	
+PRIVATE
+INT
+FUNCTION
+_InfoFormWriteTag()
+
+	FormGetData(hForm);
+
+	IF ((bOffsetError = 0) AND NOT (sTagname = ""))	THEN
+		TagWrite(sTagname, FormGetText(hForm, hWriteField), iArrayTagOffset);
+		FormSetText(hForm, hWriteField, TagRead(sTagname, iArrayTagOffset)); // Update the write value on the form
+	END
+
+	Return(0);
+END
+
+/*
+**	FUNCTION:	_InfoFormArrayTagOffset
+**	DESCRIPTION:	Gets the offset into an array tag for the tag currently
+**			being displayed in the form.
+**	Return Value:	Array offset or 0 if not an array tag.
+*/
+
+PRIVATE
+INT
+FUNCTION
+_InfoFormArrayTagOffset()
+	
+	INT     iFoundLeft;
+	INT     iFoundRight;
+	INT     iExpOffset;
+	STRING  sExpText;
+	STRING  sOffset;
+	STRING	sTag; // tag  name without cluster
+
+	bOffsetError = 0;								// Clear error flag
+	
+	// Expression may contain tagname with cluster or without cluster
+	// First check if it contains tagname with cluster
+	sExpText = DspInfo(hInfo, 1, iExpressionIndex);								// Read Expression Text
+	iExpOffset = StrSearch(0, sExpText, sTagname); 	        					// Find tagname in Expression
+
+	IF (iExpOffset = -1) THEN
+		// Second check if it contains tagname without cluster
+		sTag = DspInfo(hInfo, 3, iTagIndex);									// get tag name without cluster
+		iExpOffset = StrSearch(0, sExpText, sTag); 								// Find tagname in Expression
+		iFoundLeft = StrSearch(iExpOffset + StrLength(sTag), sExpText, "[");	// Look for [ after tagname
+	ELSE
+		iFoundLeft = StrSearch(iExpOffset + StrLength(sTagname), sExpText, "[");// Look for [ after tagname
+	END
+
+
+	IF iFoundLeft = -1 THEN
+		RETURN (0);
+	END
+	
+	iFoundRight = StrSearch(iFoundLeft, sExpText, "]"); 
+	sOffset = StrMid(sExpText, iFoundLeft + 1, iFoundRight - iFoundLeft - 1);
+	
+	ErrSet(1);					
+	StrToInt(sOffset);
+
+	IF (IsError() = 274) THEN			// Test if not an Integer 
+		sOffset = TagRead(sOffset, 0);		// If a string then assume it is a tag containing the offset and try to read offset..
+
+		IF (IsError() = 289) THEN		// if couldn't find tag
+			bOffsetError = 1;		// Mark offset as bad
+		END
+	END
+
+	ErrSet(0);
+
+	Return(StrToInt(sOffset));
+END
+
+/*
+**      FUNCTION:       InfoVarForm
+**      DESCRIPION:     Displays a form containing tag information for an object.
+**                      Function is called as a callback function from a form that
+**                      currently has a DspInfo block open and has called
+**                      FormSetInst(form, but, hInfo, DspInfo(hInfo, 3, index));
+**                      This function is retained in its original form for 
+**                      backward compatibility.
+**
+**
+*/
+
+
+int
+function InfoVarForm()
+
+	string	sTag;
+	int	hInfo;
+	int	form;
+	INT	engfield;
+
+	FormGetCurrInst(hInfo, sTag);
+
+	form = FormNew("Variable Information", 35, 15, 6);
+	FormPrompt(0,  0,  "NAME      ...");
+	FormPrompt(0,  1,  "TYPE      ...");
+	FormPrompt(0,  2,  "UNIT      ...");
+	FormPrompt(0,  3,  "ADDR      ...");
+	FormPrompt(0,  4,  "RAW_ZERO  ...");
+	FormPrompt(0,  5,  "RAW_FULL  ...");
+	FormPrompt(0,  6,  "ENG_UNITS ...");
+	FormPrompt(0,  7,  "ENG_ZERO  ...");
+	FormPrompt(0,  8,  "ENG_FULL  ...");
+	FormPrompt(0,  9,  "COMMENT   ...");
+	FormPrompt(0,  10, "FORMAT    ...");
+	FormPrompt(0,  12, "ENG_VALUE ...");
+
+	FormPrompt(16, 0,  DspInfoField(hInfo, sTag, "NAME"));
+	FormPrompt(16, 1,  DspInfoField(hInfo, sTag, "TYPE"));
+	FormPrompt(16, 2,  DspInfoField(hInfo, sTag, "UNIT"));
+	FormPrompt(16, 3,  DspInfoField(hInfo, sTag, "ADDR"));
+	FormPrompt(16, 4,  DspInfoField(hInfo, sTag, "RAW_ZERO"));
+	FormPrompt(16, 5,  DspInfoField(hInfo, sTag, "RAW_FULL"));
+	FormPrompt(16, 6,  DspInfoField(hInfo, sTag, "ENG_UNITS"));
+	FormPrompt(16, 7,  DspInfoField(hInfo, sTag, "ENG_ZERO"));
+	FormPrompt(16, 8,  DspInfoField(hInfo, sTag, "ENG_FULL"));
+	FormPrompt(16, 9,  DspInfoField(hInfo, sTag, "COMMENT"));
+	FormPrompt(16, 10, DspInfoField(hInfo, sTag, "FORMAT"));
+
+	engfield = FormPrompt(16, 12, DspInfoField(hInfo, sTag, "ENG_VALUE"));
+
+	FormButton(12, 14, "&Cancel", 0, 2);
+
+	FormRead(1);
+	while FormActive(form) and DspInfoValid(hInfo) DO
+		FormSetText(form, engfield, DspInfoField(hInfo, sTag, "ENG_VALUE"));
+		Sleep(1);
+	end;
+	FormDestroy(form);
+	return 0;
+end
+
