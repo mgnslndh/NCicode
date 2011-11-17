@@ -1,0 +1,4 @@
+﻿FUNCTION A()
+	INT a;
+	a = 10 MOD 5;
+END
