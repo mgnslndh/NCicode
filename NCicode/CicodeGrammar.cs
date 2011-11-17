@@ -98,13 +98,17 @@ namespace NCicode
             unaryExpression.Rule = unaryOperator + term;
             unaryOperator.Rule = ToTerm("-");
             arithmicExpression.Rule = expression + arithmicOperator + expression;
-            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD";                       
+            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD" | "BITAND" | "BITOR" | "BITXOR";                       
             assignmentStatement.Rule = variable + assignmentOperator + expression + semi;
             assignmentOperator.Rule = ToTerm("=");
                        
             // 4. Operators precedence
             RegisterOperators(1, "+", "-");
-            RegisterOperators(2, "*", "/", "MOD");            
+            RegisterOperators(2, "*", "/", "MOD");
+            RegisterOperators(10, "BITAND");
+            RegisterOperators(11, "BITXOR");
+            RegisterOperators(12, "BITOR");
+            
 
             // 5. Punctuation and transient terms
             MarkPunctuation("(", ")");

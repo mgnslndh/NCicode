@@ -116,6 +116,7 @@
     <EmbeddedResource Include="Regression\Cicode\RealDeclaration.ci" />
     <EmbeddedResource Include="Regression\Cicode\StringsWithEscapeCharacters.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithModulo.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithBitwiseOperators.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

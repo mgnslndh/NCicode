@@ -1,0 +1,3 @@
+﻿FUNCTION A()
+	d = x BITAND y BITOR z BITXOR w;
+END
