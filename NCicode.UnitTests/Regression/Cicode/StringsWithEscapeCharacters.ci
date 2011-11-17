@@ -1,0 +1,9 @@
+﻿STRING backspace = "^b backspace";
+STRING formFeed = "^f form feed";
+STRING newLine = "^n new line";
+STRING horizontalTab = "^t horizontal tab";
+STRING verticalTab = "^v vertical tab";
+STRING singleQuote = "^'single quote";
+STRING doubleQuote = "^" double quote";
+STRING caret = "^^ caret";
+STRING carriageReturn = "^r carriage return";

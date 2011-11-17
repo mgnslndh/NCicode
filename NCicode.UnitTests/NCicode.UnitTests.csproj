@@ -113,6 +113,8 @@
     <None Include="Citect\Include\trninfo.ci" />
     <None Include="Citect\Include\VerifyPrivilege.ci" />
     <None Include="Citect\Include\zoom.ci" />
+    <EmbeddedResource Include="Regression\Cicode\RealDeclaration.ci" />
+    <EmbeddedResource Include="Regression\Cicode\StringsWithEscapeCharacters.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

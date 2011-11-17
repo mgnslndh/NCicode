@@ -46,7 +46,8 @@ namespace NCicode
             
             // Lexical Structure
 
-            var stringLiteral = new StringLiteral("string", "\"", StringOptions.None);            
+            var stringLiteral = new StringLiteral("string", "\"", StringOptions.None);
+            stringLiteral.EscapeChar = '^';
             var numberLiteral = new NumberLiteral("number");
             var identifier = TerminalFactory.CreateCSharpIdentifier("id");
 
