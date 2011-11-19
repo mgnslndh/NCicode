@@ -126,6 +126,8 @@
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithEqualsOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotEqualsOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithNegativeOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\VariableDeclarationWithNegativeNumber.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

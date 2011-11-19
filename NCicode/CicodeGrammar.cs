@@ -141,7 +141,7 @@ namespace NCicode
             program.Rule = declarations;
             declarations.Rule = MakeStarRule(declarations, declaration);
 
-            variableInitializer.Rule = identifier + assignmentOperator + literal;
+            variableInitializer.Rule = identifier + assignmentOperator + expression;
             variableInitializers.Rule
                 = variableInitializers + "," + variableInitializer
                 | variableInitializer                
