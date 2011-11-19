@@ -102,14 +102,17 @@ namespace NCicode
             assignmentStatement.Rule = variable + assignmentOperator + expression + semi;
             assignmentOperator.Rule = ToTerm("=");
                        
-            // 4. Operators precedence
-            RegisterOperators(1, "+", "-");
-            RegisterOperators(2, "*", "/", "MOD");
-            RegisterOperators(10, "BITAND");
-            RegisterOperators(11, "BITXOR");
-            RegisterOperators(12, "BITOR");
-            
-
+            // 4. Operators precedence            
+            // RegisterOperators(2, "NOT"); FOR FUTURE IMPL.
+            RegisterOperators(3, "*", "/", "MOD");
+            //RegisterOperators(4, ":"); FOR FUTURE IMPL. What is this operator??
+            RegisterOperators(5, "+", "-");
+            //RegisterOperators(6, ">", "<", "<=", ">="); FOR FUTURE IMPL.
+            //RegisterOperators(7, "=", "<>"); FOR FUTURE IMPL.
+            //RegisterOperators(8, "AND"); FOR FUTURE IMPL.
+            //RegisterOperators(9, "OR"); FOR FUTURE IMPL.
+            RegisterOperators(10, "BITAND", "BITOR", "BITXOR");
+                        
             // 5. Punctuation and transient terms
             MarkPunctuation("(", ")");
             RegisterBracePair("(", ")");
