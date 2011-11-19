@@ -128,6 +128,12 @@
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotEqualsOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNegativeOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\VariableDeclarationWithNegativeNumber.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfIntVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfStringVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfRealVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfObjectVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfTimestampVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfQualityVariable.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

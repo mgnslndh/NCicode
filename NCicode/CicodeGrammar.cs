@@ -192,6 +192,8 @@ namespace NCicode
                 | ToTerm("STRING")
                 | ToTerm("REAL")
                 | ToTerm("OBJECT")
+                | ToTerm("QUALITY")
+                | ToTerm("TIMESTAMP")
                 ;
 
             variableScope.Rule
