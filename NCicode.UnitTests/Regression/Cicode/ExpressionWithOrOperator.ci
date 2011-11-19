@@ -1,0 +1,4 @@
+﻿FUNCTION A()
+	IF 0 OR 0 THEN
+	END
+END

@@ -117,6 +117,15 @@
     <EmbeddedResource Include="Regression\Cicode\StringsWithEscapeCharacters.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithModulo.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithBitwiseOperators.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithGreaterThanOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithLessThanOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithLessThanOrEqualOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithGreaterThanOrEqualOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithAndOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithOrOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithEqualsOperator.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotEqualsOperator.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

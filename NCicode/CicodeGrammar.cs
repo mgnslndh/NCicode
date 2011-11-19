@@ -73,7 +73,6 @@ namespace NCicode
             var expression = new NonTerminal("expression");
             var expressionList = new NonTerminal("expressionList");
             var optionalExpression = new NonTerminal("optional-expression");
-            var conditionalExpression = new NonTerminal("conditionalExpression");
             var literal = new NonTerminal("literal");
             var term = new NonTerminal("term");
             var arithmicExpression = new NonTerminal("arithmicExpression");
@@ -82,7 +81,7 @@ namespace NCicode
             var unaryOperator = new NonTerminal("UnOp");
             var arithmicOperator = new NonTerminal("arithmicOperator", "operator");            
             var assignmentStatement = new NonTerminal("AssignmentStmt");
-            var assignmentOperator = new NonTerminal("assignmentOperator");
+            var assignmentOperator = new NonTerminal("assignmentOperator");            
             var variable = new NonTerminal("variable");
 
             // 3. BNF rules
@@ -92,25 +91,27 @@ namespace NCicode
                 | expression
                 | Empty
                 ;
+
             optionalExpression.Rule = expression | Empty;
             term.Rule = literal | parenthesizedExpression | variable;
             parenthesizedExpression.Rule = "(" + expression + ")";
-            unaryExpression.Rule = unaryOperator + term;
-            unaryOperator.Rule = ToTerm("-");
+            unaryExpression.Rule = unaryOperator + expression;
+            unaryOperator.Rule = ToTerm("-") | "NOT";
             arithmicExpression.Rule = expression + arithmicOperator + expression;
-            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD" | "BITAND" | "BITOR" | "BITXOR";                       
+            // strictly speaking not only arithmetic operators... should be refactored
+            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD" | "BITAND" | "BITOR" | "BITXOR" | ">" | "<" | ">=" | "<=" | "=" | "<>" | "AND" | "OR";
             assignmentStatement.Rule = variable + assignmentOperator + expression + semi;
             assignmentOperator.Rule = ToTerm("=");
-                       
+            
             // 4. Operators precedence            
-            // RegisterOperators(2, "NOT"); FOR FUTURE IMPL.
+            RegisterOperators(2, "NOT"); 
             RegisterOperators(3, "*", "/", "MOD");
             //RegisterOperators(4, ":"); FOR FUTURE IMPL. What is this operator??
             RegisterOperators(5, "+", "-");
-            //RegisterOperators(6, ">", "<", "<=", ">="); FOR FUTURE IMPL.
-            //RegisterOperators(7, "=", "<>"); FOR FUTURE IMPL.
-            //RegisterOperators(8, "AND"); FOR FUTURE IMPL.
-            //RegisterOperators(9, "OR"); FOR FUTURE IMPL.
+            RegisterOperators(6, ">", "<", "<=", ">=");
+            RegisterOperators(7, "=", "<>"); 
+            RegisterOperators(8, "AND"); 
+            RegisterOperators(9, "OR"); 
             RegisterOperators(10, "BITAND", "BITOR", "BITXOR");
                         
             // 5. Punctuation and transient terms
