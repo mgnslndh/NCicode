@@ -134,6 +134,8 @@
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfObjectVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfTimestampVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfQualityVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfNegativeIntVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\DeclarationOfNegativeRealVariable.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>

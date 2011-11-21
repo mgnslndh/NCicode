@@ -71,6 +71,7 @@ namespace NCicode
 
             
             var expression = new NonTerminal("expression");
+            var constantExpression = new NonTerminal("constantExpression");
             var expressionList = new NonTerminal("expressionList");
             var optionalExpression = new NonTerminal("optional-expression");
             var literal = new NonTerminal("literal");
@@ -92,8 +93,14 @@ namespace NCicode
                 | Empty
                 ;
 
+            constantExpression.Rule 
+                = ToTerm("-") + numberLiteral
+                | numberLiteral
+                | stringLiteral
+                ;
+
             optionalExpression.Rule = expression | Empty;
-            term.Rule = literal | parenthesizedExpression | variable;
+            term.Rule = literal | parenthesizedExpression | variable;            
             parenthesizedExpression.Rule = "(" + expression + ")";
             unaryExpression.Rule = unaryOperator + expression;
             unaryOperator.Rule = ToTerm("-") | "NOT";
@@ -141,7 +148,7 @@ namespace NCicode
             program.Rule = declarations;
             declarations.Rule = MakeStarRule(declarations, declaration);
 
-            variableInitializer.Rule = identifier + assignmentOperator + expression;
+            variableInitializer.Rule = identifier + assignmentOperator + constantExpression;
             variableInitializers.Rule
                 = variableInitializers + "," + variableInitializer
                 | variableInitializer                
@@ -159,8 +166,8 @@ namespace NCicode
                 ;
 
             arrayInitializers.Rule
-                = arrayInitializers + "," + literal
-                | literal
+                = arrayInitializers + "," + constantExpression
+                | constantExpression
                 ;
             
             arrayDeclaration.Rule 
@@ -202,7 +209,7 @@ namespace NCicode
                 | ToTerm("MODULE")
                 ;
 
-            parameterInitializer.Rule = Empty | assignmentOperator + literal;
+            parameterInitializer.Rule = Empty | assignmentOperator + constantExpression;
 
             parameter.Rule = variableType + identifier + parameterInitializer;
 
