@@ -1,0 +1,6 @@
+﻿FUNCTION A()
+	SELECT CASE 10
+		CASE 10
+			A();
+	END SELECT	
+END

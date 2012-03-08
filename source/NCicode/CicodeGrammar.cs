@@ -43,7 +43,13 @@ namespace NCicode
             var arrayIndexers = new NonTerminal("arrayIndexers");
             var functionCall = new NonTerminal("functionCall");
             var functionCallStatement = new NonTerminal("functionCallStatement");
-            
+            var selectStatement = new NonTerminal("selectCaseStatement");
+            var caseStatement = new NonTerminal("caseStatement");
+            var caseStatements = new NonTerminal("caseStatements");
+            var caseExpression = new NonTerminal("caseExpression");
+            var caseExpressionList = new NonTerminal("caseExpressionList");
+            var caseElseStatement = new NonTerminal("caseElseStatement");
+
             // Lexical Structure
 
             var stringLiteral = new StringLiteral("string", "\"", StringOptions.None);
@@ -80,7 +86,8 @@ namespace NCicode
             var parenthesizedExpression = new NonTerminal("ParExpr");            
             var unaryExpression = new NonTerminal("UnExpr");
             var unaryOperator = new NonTerminal("UnOp");
-            var arithmicOperator = new NonTerminal("arithmicOperator", "operator");            
+            var arithmicOperator = new NonTerminal("arithmicOperator", "operator");
+            var relationalOperator = new NonTerminal("relationalOperator", "operator");
             var assignmentStatement = new NonTerminal("AssignmentStmt");
             var assignmentOperator = new NonTerminal("assignmentOperator");            
             var variable = new NonTerminal("variable");
@@ -105,8 +112,9 @@ namespace NCicode
             unaryExpression.Rule = unaryOperator + expression;
             unaryOperator.Rule = ToTerm("-") | "NOT";
             arithmicExpression.Rule = expression + arithmicOperator + expression;
+            relationalOperator.Rule = ToTerm(">") | "<" | ">=" | "<=" | "=" | "<>";
             // strictly speaking not only arithmetic operators... should be refactored
-            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD" | "BITAND" | "BITOR" | "BITXOR" | ">" | "<" | ">=" | "<=" | "=" | "<>" | "AND" | "OR";
+            arithmicOperator.Rule = ToTerm("+") | "-" | "*" | "/" | "MOD" | "BITAND" | "BITOR" | "BITXOR" | relationalOperator | "AND" | "OR";
             assignmentStatement.Rule = variable + assignmentOperator + expression + semi;
             assignmentOperator.Rule = ToTerm("=");
             
@@ -142,7 +150,33 @@ namespace NCicode
             optionalElseStatement.Rule = Empty | ToTerm("ELSE") + block;
 
             functionCall.Rule = identifier + "(" + expressionList + ")";
-            
+
+            caseExpression.Rule
+                = expression
+                | expression + ToTerm("TO") + expression
+                | ToTerm("IS") + relationalOperator + expression
+                ;
+
+            caseExpressionList.Rule
+                = caseExpressionList + "," + caseExpression
+                | caseExpression                
+                ;
+
+            caseStatement.Rule
+                = ToTerm("CASE") + caseExpressionList + statements                
+                ;
+
+            caseElseStatement.Rule
+                = ToTerm("CASE") + ToTerm("ELSE");
+
+            caseStatements.Rule
+                = caseStatements + caseStatement
+                | caseStatements + caseElseStatement
+                | caseStatement;
+
+            selectStatement.Rule
+                = ToTerm("SELECT") + ToTerm("CASE") + expression + caseStatements + ToTerm("END") + ToTerm("SELECT");
+
             this.Root = program;
 
             program.Rule = declarations;
@@ -224,7 +258,8 @@ namespace NCicode
             statements.Rule = MakeStarRule(statements, statement);
             statement.Rule
                 = semiStatement
-                | ifStatement                
+                | ifStatement
+                | selectStatement
                 ;
 
             functionCallStatement.Rule = functionCall + semi;

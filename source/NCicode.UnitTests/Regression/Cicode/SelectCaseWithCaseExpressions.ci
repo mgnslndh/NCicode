@@ -1,0 +1,6 @@
+﻿FUNCTION A()
+	SELECT CASE 10
+		CASE a,b,1 TO 2,c,IS > d,a,3 TO 4
+			A();
+	END SELECT	
+END

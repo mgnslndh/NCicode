@@ -64,6 +64,7 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>RegressionTests.tt</DependentUpon>
     </Compile>
+    <Compile Include="Regression\SelectCaseStatementTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\NCicode\NCicode.csproj">
@@ -127,7 +128,6 @@
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithEqualsOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNotEqualsOperator.ci" />
     <EmbeddedResource Include="Regression\Cicode\ExpressionWithNegativeOperator.ci" />
-    <EmbeddedResource Include="Regression\Cicode\VariableDeclarationWithNegativeNumber.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfIntVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfStringVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfRealVariable.ci" />
@@ -136,6 +136,12 @@
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfQualityVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfNegativeIntVariable.ci" />
     <EmbeddedResource Include="Regression\Cicode\DeclarationOfNegativeRealVariable.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseExpression.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseExpressionList.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseExpressionToExpression.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseElse.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseExpressionIs.ci" />
+    <EmbeddedResource Include="Regression\Cicode\SelectCaseWithCaseExpressions.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>
