@@ -1,9 +1,9 @@
 NCicode
 =======
 
-NCicode is a .NET parser library for the Cicode programming language. 
+NCicode is a .NET parser library for the Cicode programming language written in C# 
 
-The reason I am working on this parser is to be able to use it as a component for future projects that I have ideas for.
+The goal of this project is to create a complete parser for the Cicode programming language that can be used as a component for building Cicode tools.
 
 Cicode
 ------
