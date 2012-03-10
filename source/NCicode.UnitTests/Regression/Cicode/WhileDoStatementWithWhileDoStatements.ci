@@ -1,0 +1,8 @@
+﻿FUNCTION A()
+	WHILE 1 DO
+		WHILE 2 DO 
+			WHILE 3 DO
+			END
+		END
+	END
+END

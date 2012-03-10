@@ -1,0 +1,6 @@
+﻿FUNCTION A()
+	WHILE 1 DO
+		A();
+		B();
+	END
+END
