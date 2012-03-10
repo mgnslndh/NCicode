@@ -50,6 +50,7 @@ namespace NCicode
             var caseExpressionList = new NonTerminal("caseExpressionList");
             var caseElseStatement = new NonTerminal("caseElseStatement");
             var whileDoStatement = new NonTerminal("whileDoStatement");
+            var forStatement = new NonTerminal("forStatement");
 
             // Lexical Structure
 
@@ -181,6 +182,9 @@ namespace NCicode
             whileDoStatement.Rule
                 = ToTerm("WHILE") + expression + ToTerm("DO") + statements + ToTerm("END");
 
+            forStatement.Rule
+                = ToTerm("FOR") + variable + ToTerm("=") + expression + ToTerm("TO") + expression + ToTerm("DO") + statements + ToTerm("END");
+
             this.Root = program;
 
             program.Rule = declarations;
@@ -265,6 +269,7 @@ namespace NCicode
                 | ifStatement
                 | selectStatement
                 | whileDoStatement
+                | forStatement
                 ;
 
             functionCallStatement.Rule = functionCall + semi;

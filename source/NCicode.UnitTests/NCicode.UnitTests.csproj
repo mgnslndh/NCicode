@@ -145,6 +145,8 @@
     <EmbeddedResource Include="Regression\Cicode\WhileDoStatementWithEmptyStatementBlock.ci" />
     <EmbeddedResource Include="Regression\Cicode\WhileDoStatementWithStatements.ci" />
     <EmbeddedResource Include="Regression\Cicode\WhileDoStatementWithWhileDoStatements.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ForDoStatementWithStatements.ci" />
+    <EmbeddedResource Include="Regression\Cicode\ForDoStatementWithEmptyStatementBlock.ci" />
     <None Include="Regression\RegressionTests.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>RegressionTests.generated.cs</LastGenOutput>
